@@ -3,55 +3,65 @@ module kratos-admin
 go 1.24.6
 
 replace (
-	github.com/armon/go-metrics => github.com/hashicorp/go-metrics v0.4.1
-	github.com/bufbuild/protovalidate-go => buf.build/go/protovalidate v0.10.1
+        github.com/armon/go-metrics => github.com/hashicorp/go-metrics v0.4.1
+        github.com/bufbuild/protovalidate-go => buf.build/go/protovalidate v0.10.1
+        gorm.io/driver/mysql => ./third_party/gorm.io/driver/mysql
+        gorm.io/driver/postgres => ./third_party/gorm.io/driver/postgres
+        gorm.io/driver/oracle => ./third_party/gorm.io/driver/oracle
+        gorm.io/gorm => ./third_party/gorm.io/gorm
+        gorm.io/gorm/logger => ./third_party/gorm.io/gorm/logger
 )
 
 require (
-	entgo.io/ent v0.14.5
-	github.com/arrakis-digital/protoc-gen-redact/v3 v3.3.0
-	github.com/getkin/kin-openapi v0.133.0
-	github.com/go-kratos/kratos/v2 v2.9.1
-	github.com/go-sql-driver/mysql v1.9.3
-	github.com/golang-jwt/jwt/v5 v5.3.0
-	github.com/google/gnostic v0.7.1
-	github.com/google/uuid v1.6.0
-	github.com/google/wire v0.7.0
-	github.com/hibiken/asynq v0.25.1
-	github.com/jackc/pgx/v5 v5.7.6
-	github.com/jinzhu/copier v0.4.0
-	github.com/lib/pq v1.10.9
-	github.com/mileusna/useragent v1.3.5
-	github.com/minio/minio-go/v7 v7.0.95
-	github.com/redis/go-redis/v9 v9.16.0
-	github.com/stretchr/testify v1.11.1
-	github.com/tx7do/go-utils v1.1.29
-	github.com/tx7do/go-utils/copierutil v0.0.5
-	github.com/tx7do/go-utils/entgo v1.1.38
-	github.com/tx7do/go-utils/geoip v1.1.6
-	github.com/tx7do/go-utils/jwtutil v0.0.2
-	github.com/tx7do/go-utils/mapper v0.0.3
-	github.com/tx7do/go-utils/password v0.0.1
-	github.com/tx7do/kratos-authn v1.1.8
-	github.com/tx7do/kratos-authn/engine/jwt v1.1.8
-	github.com/tx7do/kratos-authn/middleware v1.1.9
-	github.com/tx7do/kratos-authz v1.1.6
-	github.com/tx7do/kratos-authz/engine/casbin v1.1.10
-	github.com/tx7do/kratos-authz/engine/opa v1.1.13
-	github.com/tx7do/kratos-authz/middleware v1.1.11
-	github.com/tx7do/kratos-bootstrap/api v0.0.27
-	github.com/tx7do/kratos-bootstrap/bootstrap v0.0.20
-	github.com/tx7do/kratos-bootstrap/cache/redis v0.0.12
-	github.com/tx7do/kratos-bootstrap/oss/minio v0.0.11
-	github.com/tx7do/kratos-bootstrap/rpc v0.0.19
-	github.com/tx7do/kratos-swagger-ui v0.0.0-20250528131001-09c0dbdb208d
-	github.com/tx7do/kratos-transport v1.1.17
-	github.com/tx7do/kratos-transport/transport/asynq v1.2.35
-	github.com/tx7do/kratos-transport/transport/sse v1.2.24
-	google.golang.org/genproto v0.0.0-20251022142026-3a174f9686a8
-	google.golang.org/genproto/googleapis/api v0.0.0-20251022142026-3a174f9686a8
-	google.golang.org/grpc v1.76.0
-	google.golang.org/protobuf v1.36.10
+        entgo.io/ent v0.14.5
+        github.com/arrakis-digital/protoc-gen-redact/v3 v3.3.0
+        github.com/getkin/kin-openapi v0.133.0
+        github.com/go-kratos/kratos/v2 v2.9.1
+        github.com/go-sql-driver/mysql v1.9.3
+        github.com/golang-jwt/jwt/v5 v5.3.0
+        github.com/google/gnostic v0.7.1
+        github.com/google/uuid v1.6.0
+        github.com/google/wire v0.7.0
+        github.com/hibiken/asynq v0.25.1
+        github.com/jackc/pgx/v5 v5.7.6
+        github.com/jinzhu/copier v0.4.0
+        github.com/lib/pq v1.10.9
+        github.com/mileusna/useragent v1.3.5
+        github.com/minio/minio-go/v7 v7.0.95
+        github.com/redis/go-redis/v9 v9.16.0
+        github.com/stretchr/testify v1.11.1
+        github.com/tx7do/go-utils v1.1.29
+        github.com/tx7do/go-utils/copierutil v0.0.5
+        github.com/tx7do/go-utils/entgo v1.1.38
+        github.com/tx7do/go-utils/geoip v1.1.6
+        github.com/tx7do/go-utils/jwtutil v0.0.2
+        github.com/tx7do/go-utils/mapper v0.0.3
+        github.com/tx7do/go-utils/password v0.0.1
+        github.com/tx7do/kratos-authn v1.1.8
+        github.com/tx7do/kratos-authn/engine/jwt v1.1.8
+        github.com/tx7do/kratos-authn/middleware v1.1.9
+        github.com/tx7do/kratos-authz v1.1.6
+        github.com/tx7do/kratos-authz/engine/casbin v1.1.10
+        github.com/tx7do/kratos-authz/engine/opa v1.1.13
+        github.com/tx7do/kratos-authz/middleware v1.1.11
+        github.com/tx7do/kratos-bootstrap/api v0.0.27
+        github.com/tx7do/kratos-bootstrap/bootstrap v0.0.20
+        github.com/tx7do/kratos-bootstrap/cache/redis v0.0.12
+        github.com/tx7do/kratos-bootstrap/oss/minio v0.0.11
+        github.com/tx7do/kratos-bootstrap/rpc v0.0.19
+        github.com/tx7do/kratos-swagger-ui v0.0.0-20250528131001-09c0dbdb208d
+        github.com/tx7do/kratos-transport v1.1.17
+        github.com/tx7do/kratos-transport/transport/asynq v1.2.35
+        github.com/tx7do/kratos-transport/transport/sse v1.2.24
+        google.golang.org/genproto v0.0.0-20251022142026-3a174f9686a8
+        google.golang.org/genproto/googleapis/api v0.0.0-20251022142026-3a174f9686a8
+        google.golang.org/grpc v1.76.0
+        google.golang.org/protobuf v1.36.10
+        gorm.io/driver/mysql v0.0.0-00010101000000-000000000000
+        gorm.io/driver/oracle v0.0.0-00010101000000-000000000000
+        gorm.io/driver/postgres v0.0.0-00010101000000-000000000000
+        gorm.io/gorm v0.0.0-00010101000000-000000000000
+        gorm.io/gorm/logger v0.0.0-00010101000000-000000000000
 )
 
 require (
