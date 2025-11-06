@@ -11,6 +11,7 @@ var ProviderSet = wire.NewSet(
 
 	NewRedisClient,
 	NewEntClient,
+	NewGormClient,
 
 	NewAuthenticator,
 	NewAuthorizer,

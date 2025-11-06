@@ -16,6 +16,8 @@ import (
 	"kratos-admin/app/admin/service/internal/data/ent"
 
 	"kratos-admin/pkg/oss"
+
+	"gorm.io/gorm"
 )
 
 // Data .
@@ -24,6 +26,7 @@ type Data struct {
 
 	rdb *redis.Client
 	db  *entgo.EntClient[*ent.Client]
+	orm *gorm.DB
 
 	authenticator authnEngine.Authenticator
 	authorizer    *Authorizer
@@ -33,6 +36,7 @@ type Data struct {
 func NewData(
 	logger log.Logger,
 	db *entgo.EntClient[*ent.Client],
+	orm *gorm.DB,
 	rdb *redis.Client,
 ) (*Data, func(), error) {
 	l := log.NewHelper(log.With(logger, "module", "data/admin-service"))
@@ -41,6 +45,7 @@ func NewData(
 		log: l,
 
 		db:  db,
+		orm: orm,
 		rdb: rdb,
 	}
 
@@ -49,6 +54,17 @@ func NewData(
 
 		if d.db != nil {
 			if err := d.db.Close(); err != nil {
+				l.Error(err)
+			}
+		}
+
+		if d.orm != nil {
+			sqlDB, err := d.orm.DB()
+			if err == nil {
+				if err := sqlDB.Close(); err != nil {
+					l.Error(err)
+				}
+			} else {
 				l.Error(err)
 			}
 		}
@@ -116,4 +132,9 @@ func NewPasswordCrypto() password.Crypto {
 		panic(err)
 	}
 	return crypto
+}
+
+// ORM returns the underlying gorm database instance.
+func (d *Data) ORM() *gorm.DB {
+	return d.orm
 }
