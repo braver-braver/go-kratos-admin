@@ -79,6 +79,19 @@ docker:
 # generate code
 gen: ent wire api openapi
 
+# generate gorm/gen code
+gorm-gen:
+	@if [ -z "$(GORM_DRIVER)" ]; then \
+		echo "GORM_DRIVER is required. example: make gorm-gen GORM_DRIVER=postgres GORM_DSN='host=... sslmode=disable'"; \
+		exit 1; \
+	fi
+	@if [ -z "$(GORM_DSN)" ]; then \
+		echo "GORM_DSN is required. example: make gorm-gen GORM_DRIVER=postgres GORM_DSN='host=... sslmode=disable'"; \
+		exit 1; \
+	fi
+	@GORM_DRIVER=$(GORM_DRIVER) GORM_DSN=$(GORM_DSN) GORM_OUT=$(GORM_OUT) \
+		go run ../../../cmd/gormgen
+
 # generate ent code
 ent:
 ifneq ("$(wildcard ./internal/data/ent)","")

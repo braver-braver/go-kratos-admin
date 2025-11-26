@@ -3,6 +3,7 @@ package oss
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -29,6 +30,9 @@ func createTestClient() *MinIOClient {
 }
 
 func TestMinIoClient(t *testing.T) {
+	if os.Getenv("MINIO_TEST") != "1" {
+		t.Skip("MINIO_TEST not set; skipping MinIO integration test")
+	}
 	cli := createTestClient()
 	assert.NotNil(t, cli)
 
@@ -43,6 +47,9 @@ func TestMinIoClient(t *testing.T) {
 }
 
 func TestListFile(t *testing.T) {
+	if os.Getenv("MINIO_TEST") != "1" {
+		t.Skip("MINIO_TEST not set; skipping MinIO integration test")
+	}
 	cli := createTestClient()
 	assert.NotNil(t, cli)
 

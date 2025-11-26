@@ -102,7 +102,7 @@ func (s *TenantService) Create(ctx context.Context, req *userV1.CreateTenantRequ
 
 	req.Data.CreatedBy = trans.Ptr(operator.UserId)
 
-	if _, err = s.tenantRepo.Create(ctx, req.Data); err != nil {
+	if _, err = s.tenantRepo.Create(ctx, req); err != nil {
 		return nil, err
 	}
 
@@ -174,7 +174,7 @@ func (s *TenantService) CreateTenantWithAdminUser(ctx context.Context, req *admi
 
 	// Create tenant
 	var tenant *userV1.Tenant
-	if tenant, err = s.tenantRepo.Create(ctx, req.Tenant); err != nil {
+	if tenant, err = s.tenantRepo.Create(ctx, &userV1.CreateTenantRequest{Data: req.Tenant}); err != nil {
 		s.log.Errorf("create tenant err: %v", err)
 		return nil, err
 	}

@@ -144,6 +144,18 @@ make ent
 make wire
 ```
 
+#### 生成 gorm/gen 代码
+
+在生成前需要提供数据库驱动与 DSN（将自动连接到数据库读取表结构）：
+
+```bash
+make gorm-gen GORM_DRIVER=postgres GORM_DSN="host=postgres port=5432 user=postgres password=*Abcd123456 dbname=kratos_admin sslmode=disable"
+```
+
+> - `GORM_DRIVER` 当前支持 `postgres`、`mysql`、`oracle`。
+> - 生成目录默认输出到 `internal/data/gorm`，可通过 `GORM_OUT` 自定义。
+> - Oracle 会强制将表名转换为大写以避免大小写不一致的问题。
+
 #### 构建二进制文件
 
 ```bash

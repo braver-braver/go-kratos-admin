@@ -10,7 +10,9 @@ var ProviderSet = wire.NewSet(
 	NewData,
 
 	NewRedisClient,
-	NewEntClient,
+	//NewEntClient,
+
+	NewGormClient,
 
 	NewAuthenticator,
 	NewAuthorizer,
@@ -33,14 +35,6 @@ var ProviderSet = wire.NewSet(
 	NewUserRepo,
 	NewTenantRepo,
 	NewUserCredentialRepo,
-
-	NewRoleApiRepo,
-	NewRoleDeptRepo,
-	NewRoleMenuRepo,
-	NewRoleOrgRepo,
-	NewRolePositionRepo,
-	NewUserRoleRepo,
-	NewUserPositionRepo,
 
 	NewAdminLoginLogRepo,
 	NewAdminOperationLogRepo,

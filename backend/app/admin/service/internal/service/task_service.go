@@ -339,7 +339,7 @@ func (s *TaskService) startTask(t *adminV1.Task) error {
 }
 
 // AsyncBackup 异步备份
-func (s *TaskService) AsyncBackup(taskType string, taskData *task.BackupTaskData) error {
-	s.log.Infof("AsyncBackup [%s] [%+v] [%s]", taskType, taskData, taskData.Name)
+func (s *TaskService) AsyncBackup(ctx context.Context, taskType string, taskData *task.BackupTaskData) error {
+	s.log.WithContext(ctx).Infof("AsyncBackup [%s] [%+v] [%s]", taskType, taskData, taskData.Name)
 	return nil
 }

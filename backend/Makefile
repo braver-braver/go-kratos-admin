@@ -93,6 +93,13 @@ ent:
       make ent;\
     )
 
+# generate gorm code via gorm/gen
+gorm-gen:
+	$(foreach dir, $(dir $(realpath $(SRCS_MK))),\
+      cd $(dir);\
+      make gorm-gen GORM_DRIVER=$(GORM_DRIVER) GORM_DSN=$(GORM_DSN) GORM_OUT=$(GORM_OUT);\
+    )
+
 # generate protobuf api go code
 api:
 	@cd api && \

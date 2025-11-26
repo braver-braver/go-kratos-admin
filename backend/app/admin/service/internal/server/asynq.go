@@ -31,8 +31,8 @@ func NewAsynqServer(cfg *conf.Bootstrap, _ log.Logger, svc *service.TaskService)
 
 	var err error
 
-	// 注册任务
-	if err = asynq.RegisterSubscriber(srv, task.BackupTaskType, svc.AsyncBackup); err != nil {
+	// 注册任务（携带上下文以保留 trace/span 信息）
+	if err = asynq.RegisterSubscriberWithCtx(srv, task.BackupTaskType, svc.AsyncBackup); err != nil {
 		log.Error(err)
 	}
 

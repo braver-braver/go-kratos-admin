@@ -2,95 +2,38 @@ package data
 
 import (
 	"context"
-	"sort"
 	"time"
 
-	"entgo.io/ent/dialect/sql"
-	"github.com/go-kratos/kratos/v2/log"
-	"github.com/tx7do/go-utils/entgo"
+	userV1 "kratos-admin/api/gen/go/user/service/v1"
+	"kratos-admin/app/admin/service/internal/data/gorm/model"
+	"kratos-admin/app/admin/service/internal/data/gorm/query"
+	"kratos-admin/pkg/datautil"
 
-	"github.com/tx7do/go-utils/copierutil"
-	entgoQuery "github.com/tx7do/go-utils/entgo/query"
-	entgoUpdate "github.com/tx7do/go-utils/entgo/update"
-	"github.com/tx7do/go-utils/fieldmaskutil"
-	"github.com/tx7do/go-utils/mapper"
+	"github.com/go-kratos/kratos/v2/log"
 	"github.com/tx7do/go-utils/timeutil"
 	pagination "github.com/tx7do/kratos-bootstrap/api/gen/go/pagination/v1"
-
-	"kratos-admin/app/admin/service/internal/data/ent"
-	"kratos-admin/app/admin/service/internal/data/ent/position"
-
-	userV1 "kratos-admin/api/gen/go/user/service/v1"
 )
 
+// PositionRepo is the GORM-backed repository for positions.
 type PositionRepo struct {
-	data *Data
-	log  *log.Helper
-
-	mapper          *mapper.CopierMapper[userV1.Position, ent.Position]
-	statusConverter *mapper.EnumTypeConverter[userV1.Position_Status, position.Status]
+	log *log.Helper
+	q   *query.Query
 }
 
 func NewPositionRepo(data *Data, logger log.Logger) *PositionRepo {
-	repo := &PositionRepo{
-		log:             log.NewHelper(log.With(logger, "module", "position/repo/admin-service")),
-		data:            data,
-		mapper:          mapper.NewCopierMapper[userV1.Position, ent.Position](),
-		statusConverter: mapper.NewEnumTypeConverter[userV1.Position_Status, position.Status](userV1.Position_Status_name, userV1.Position_Status_value),
+	return &PositionRepo{
+		log: log.NewHelper(log.With(logger, "module", "position/repo/admin-service")),
+		q:   query.Use(data.db),
 	}
-
-	repo.init()
-
-	return repo
 }
 
-func (r *PositionRepo) init() {
-	r.mapper.AppendConverters(copierutil.NewTimeStringConverterPair())
-	r.mapper.AppendConverters(copierutil.NewTimeTimestamppbConverterPair())
-
-	r.mapper.AppendConverters(r.statusConverter.NewConverterPair())
-}
-
-func (r *PositionRepo) travelChild(nodes []*userV1.Position, node *userV1.Position) bool {
-	if nodes == nil {
-		return false
-	}
-
-	if node.ParentId == nil {
-		nodes = append(nodes, node)
-		return true
-	}
-
-	for _, n := range nodes {
-		if node.ParentId == nil {
-			continue
-		}
-
-		if n.GetId() == node.GetParentId() {
-			n.Children = append(n.Children, node)
-			return true
-		} else {
-			if r.travelChild(n.Children, node) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (r *PositionRepo) Count(ctx context.Context, whereCond []func(s *sql.Selector)) (int, error) {
-	builder := r.data.db.Client().Position.Query()
-	if len(whereCond) != 0 {
-		builder.Modify(whereCond...)
-	}
-
-	count, err := builder.Count(ctx)
+func (r *PositionRepo) Count(ctx context.Context, _ []func(any)) (int, error) {
+	count, err := r.q.Position.WithContext(ctx).Count()
 	if err != nil {
 		r.log.Errorf("query count failed: %s", err.Error())
 		return 0, userV1.ErrorInternalServerError("query count failed")
 	}
-
-	return count, nil
+	return int(count), nil
 }
 
 func (r *PositionRepo) List(ctx context.Context, req *pagination.PagingRequest) (*userV1.ListPositionResponse, error) {
@@ -98,159 +41,93 @@ func (r *PositionRepo) List(ctx context.Context, req *pagination.PagingRequest) 
 		return nil, userV1.ErrorBadRequest("invalid parameter")
 	}
 
-	builder := r.data.db.Client().Position.Query()
+	builder := r.q.Position.WithContext(ctx).Order(r.q.Position.SortID.Desc())
 
-	err, whereSelectors, querySelectors := entgoQuery.BuildQuerySelector(
-		req.GetQuery(), req.GetOrQuery(),
-		req.GetPage(), req.GetPageSize(), req.GetNoPaging(),
-		req.GetOrderBy(), position.FieldCreatedAt,
-		req.GetFieldMask().GetPaths(),
-	)
-	if err != nil {
-		r.log.Errorf("parse list param error [%s]", err.Error())
-		return nil, userV1.ErrorBadRequest("invalid query parameter")
+	if !req.GetNoPaging() {
+		ps := int(req.GetPageSize())
+		if ps <= 0 {
+			ps = 10
+		}
+		offset := int(req.GetPage()-1) * ps
+		if offset < 0 {
+			offset = 0
+		}
+		builder = builder.Offset(offset).Limit(ps)
 	}
 
-	if querySelectors != nil {
-		builder.Modify(querySelectors...)
-	}
-
-	entities, err := builder.All(ctx)
+	entities, err := builder.Find()
 	if err != nil {
 		r.log.Errorf("query list failed: %s", err.Error())
 		return nil, userV1.ErrorInternalServerError("query list failed")
 	}
 
-	sort.SliceStable(entities, func(i, j int) bool {
-		var sortI, sortJ int32
-		if entities[i].SortOrder != nil {
-			sortI = *entities[i].SortOrder
-		}
-		if entities[j].SortOrder != nil {
-			sortJ = *entities[j].SortOrder
-		}
-		return sortI < sortJ
-	})
-
-	dtos := make([]*userV1.Position, 0, len(entities))
-	for _, entity := range entities {
-		if entity.ParentID == nil {
-			dto := r.mapper.ToDTO(entity)
-			dtos = append(dtos, dto)
-		}
-	}
-	for _, entity := range entities {
-		if entity.ParentID != nil {
-			dto := r.mapper.ToDTO(entity)
-
-			if r.travelChild(dtos, dto) {
-				continue
-			}
-
-			dtos = append(dtos, dto)
-		}
-	}
-
-	count, err := r.Count(ctx, whereSelectors)
+	total, err := r.q.Position.WithContext(ctx).Count()
 	if err != nil {
-		return nil, err
+		r.log.Errorf("query count failed: %s", err.Error())
+		return nil, userV1.ErrorInternalServerError("query count failed")
+	}
+
+	items := make([]*userV1.Position, 0, len(entities))
+	for _, e := range entities {
+		items = append(items, r.toDTO(e))
 	}
 
 	return &userV1.ListPositionResponse{
-		Total: uint32(count),
-		Items: dtos,
-	}, err
+		Total: uint32(total),
+		Items: items,
+	}, nil
 }
 
 func (r *PositionRepo) IsExist(ctx context.Context, id uint32) (bool, error) {
-	exist, err := r.data.db.Client().Position.Query().
-		Where(position.IDEQ(id)).
-		Exist(ctx)
+	count, err := r.q.Position.WithContext(ctx).
+		Where(r.q.Position.ID.Eq(int32(id))).
+		Count()
 	if err != nil {
 		r.log.Errorf("query exist failed: %s", err.Error())
 		return false, userV1.ErrorInternalServerError("query exist failed")
 	}
-	return exist, nil
+	return count > 0, nil
 }
 
 func (r *PositionRepo) Get(ctx context.Context, req *userV1.GetPositionRequest) (*userV1.Position, error) {
 	if req == nil {
 		return nil, userV1.ErrorBadRequest("invalid parameter")
 	}
-
-	entity, err := r.data.db.Client().Position.Get(ctx, req.GetId())
+	entity, err := r.q.Position.WithContext(ctx).
+		Where(r.q.Position.ID.Eq(int32(req.GetId()))).
+		First()
 	if err != nil {
-		if ent.IsNotFound(err) {
-			return nil, userV1.ErrorPositionNotFound("position not found")
-		}
-
 		r.log.Errorf("query one data failed: %s", err.Error())
-
-		return nil, userV1.ErrorInternalServerError("query data failed")
+		return nil, userV1.ErrorNotFound("position not found")
 	}
-
-	return r.mapper.ToDTO(entity), nil
+	return r.toDTO(entity), nil
 }
 
-// GetPositionByIds 通过多个ID获取职位信息
-func (r *PositionRepo) GetPositionByIds(ctx context.Context, ids []uint32) ([]*userV1.Position, error) {
-	if len(ids) == 0 {
-		return []*userV1.Position{}, nil
-	}
-
-	entities, err := r.data.db.Client().Position.Query().
-		Where(position.IDIn(ids...)).
-		All(ctx)
-	if err != nil {
-		r.log.Errorf("query position by ids failed: %s", err.Error())
-		return nil, userV1.ErrorInternalServerError("query position by ids failed")
-	}
-
-	dtos := make([]*userV1.Position, 0, len(entities))
-	for _, entity := range entities {
-		dto := r.mapper.ToDTO(entity)
-		dtos = append(dtos, dto)
-	}
-
-	return dtos, nil
-}
-
-func (r *PositionRepo) Create(ctx context.Context, req *userV1.CreatePositionRequest) error {
+func (r *PositionRepo) Create(ctx context.Context, req *userV1.CreatePositionRequest) (*userV1.Position, error) {
 	if req == nil || req.Data == nil {
-		return userV1.ErrorBadRequest("invalid parameter")
+		return nil, userV1.ErrorBadRequest("invalid parameter")
 	}
 
-	builder := r.data.db.Client().Position.Create().
-		SetNillableName(req.Data.Name).
-		SetNillableParentID(req.Data.ParentId).
-		SetNillableSortOrder(req.Data.SortOrder).
-		SetNillableCode(req.Data.Code).
-		SetNillableStatus(r.statusConverter.ToEntity(req.Data.Status)).
-		SetNillableRemark(req.Data.Remark).
-		SetNillableQuota(req.Data.Quota).
-		SetNillableDescription(req.Data.Description).
-		SetOrganizationID(req.Data.GetOrganizationId()).
-		SetDepartmentID(req.Data.GetDepartmentId()).
-		SetNillableCreatedBy(req.Data.CreatedBy).
-		SetNillableCreatedAt(timeutil.TimestamppbToTime(req.Data.CreatedAt))
-
-	if req.Data.TenantId == nil {
-		builder.SetTenantID(req.Data.GetTenantId())
-	}
-	if req.Data.CreatedAt == nil {
-		builder.SetCreatedAt(time.Now())
+	now := time.Now()
+	entity := &model.Position{
+		CreatedAt: &now,
+		UpdatedAt: &now,
+		Status:    positionStatusToString(req.Data.Status),
+		CreateBy:  cloneInt64FromUint32(req.Data.CreatedBy),
+		UpdateBy:  cloneInt64FromUint32(req.Data.UpdatedBy),
+		Remark:    cloneStringPtr(req.Data.Remark),
+		TenantID:  cloneInt64FromUint32(req.Data.TenantId),
+		Name:      req.Data.GetName(),
+		Code:      req.Data.GetCode(),
+		SortID:    req.Data.GetSortOrder(),
+		ParentID:  cloneInt32FromUint32(req.Data.ParentId),
 	}
 
-	if req.Data.Id != nil {
-		builder.SetID(req.Data.GetId())
+	if err := r.q.Position.WithContext(ctx).Create(entity); err != nil {
+		r.log.Errorf("insert data failed: %s", err.Error())
+		return nil, userV1.ErrorInternalServerError("insert data failed")
 	}
-
-	if err := builder.Exec(ctx); err != nil {
-		r.log.Errorf("insert one data failed: %s", err.Error())
-		return userV1.ErrorInternalServerError("insert data failed")
-	}
-
-	return nil
+	return r.toDTO(entity), nil
 }
 
 func (r *PositionRepo) Update(ctx context.Context, req *userV1.UpdatePositionRequest) error {
@@ -258,89 +135,114 @@ func (r *PositionRepo) Update(ctx context.Context, req *userV1.UpdatePositionReq
 		return userV1.ErrorBadRequest("invalid parameter")
 	}
 
-	// 如果不存在则创建
-	if req.GetAllowMissing() {
-		exist, err := r.IsExist(ctx, req.GetData().GetId())
-		if err != nil {
-			return err
-		}
-		if !exist {
-			createReq := &userV1.CreatePositionRequest{Data: req.Data}
-			createReq.Data.CreatedBy = createReq.Data.UpdatedBy
-			createReq.Data.UpdatedBy = nil
-			return r.Create(ctx, createReq)
-		}
+	update := map[string]any{}
+	if req.Data.Name != nil {
+		update["name"] = req.Data.GetName()
 	}
-
-	if req.UpdateMask != nil {
-		req.UpdateMask.Normalize()
-		if !req.UpdateMask.IsValid(req.Data) {
-			r.log.Errorf("invalid field mask [%v]", req.UpdateMask)
-			return userV1.ErrorBadRequest("invalid field mask")
-		}
-		fieldmaskutil.Filter(req.GetData(), req.UpdateMask.GetPaths())
+	if req.Data.Code != nil {
+		update["code"] = req.Data.GetCode()
 	}
-
-	builder := r.data.db.Client().Position.UpdateOneID(req.Data.GetId()).
-		SetNillableName(req.Data.Name).
-		SetNillableParentID(req.Data.ParentId).
-		SetNillableSortOrder(req.Data.SortOrder).
-		SetNillableCode(req.Data.Code).
-		SetNillableStatus(r.statusConverter.ToEntity(req.Data.Status)).
-		SetNillableRemark(req.Data.Remark).
-		SetNillableQuota(req.Data.Quota).
-		SetNillableDescription(req.Data.Description).
-		SetNillableUpdatedBy(req.Data.UpdatedBy).
-		SetNillableUpdatedAt(timeutil.TimestamppbToTime(req.Data.UpdatedAt))
-
-	if req.Data.UpdatedAt == nil {
-		builder.SetUpdatedAt(time.Now())
+	if req.Data.SortOrder != nil {
+		update["sort_id"] = req.Data.GetSortOrder()
 	}
-
-	if req.Data.OrganizationId == nil {
-		builder.SetOrganizationID(req.Data.GetOrganizationId())
+	if req.Data.ParentId != nil {
+		update["parent_id"] = req.Data.GetParentId()
 	}
-
-	if req.Data.DepartmentId == nil {
-		builder.SetDepartmentID(req.Data.GetDepartmentId())
+	if req.Data.Status != nil {
+		update["status"] = req.Data.GetStatus().String()
 	}
-
-	if req.UpdateMask != nil {
-		nilPaths := fieldmaskutil.NilValuePaths(req.Data, req.GetUpdateMask().GetPaths())
-		nilUpdater := entgoUpdate.BuildSetNullUpdater(nilPaths)
-		if nilUpdater != nil {
-			builder.Modify(nilUpdater)
-		}
+	if req.Data.UpdatedBy != nil {
+		update["update_by"] = req.Data.GetUpdatedBy()
 	}
+	update["updated_at"] = time.Now()
 
-	if err := builder.Exec(ctx); err != nil {
-		r.log.Errorf("update one data failed: %s", err.Error())
+	_, err := r.q.Position.WithContext(ctx).
+		Where(r.q.Position.ID.Eq(int32(req.Data.GetId()))).
+		Updates(update)
+	if err != nil {
+		r.log.Errorf("update data failed: %s", err.Error())
 		return userV1.ErrorInternalServerError("update data failed")
 	}
-
 	return nil
 }
 
-func (r *PositionRepo) Delete(ctx context.Context, req *userV1.DeletePositionRequest) error {
-	if req == nil {
-		return userV1.ErrorBadRequest("invalid parameter")
-	}
-
-	ids, err := entgo.QueryAllChildrenIds(ctx, r.data.db, "sys_positions", req.GetId())
+func (r *PositionRepo) Delete(ctx context.Context, positionId uint32) error {
+	_, err := r.q.Position.WithContext(ctx).
+		Where(r.q.Position.ID.Eq(int32(positionId))).
+		Delete()
 	if err != nil {
-		r.log.Errorf("query child positions failed: %s", err.Error())
-		return userV1.ErrorInternalServerError("query child positions failed")
+		r.log.Errorf("delete data failed: %s", err.Error())
+		return userV1.ErrorInternalServerError("delete data failed")
 	}
-	ids = append(ids, req.GetId())
+	return nil
+}
 
-	//r.log.Infof("child positions to delete: %+v", ids)
-
-	if _, err = r.data.db.Client().Position.Delete().
-		Where(position.IDIn(ids...)).
-		Exec(ctx); err != nil {
-		r.log.Errorf("delete positions failed: %s", err.Error())
-		return userV1.ErrorInternalServerError("delete positions failed")
+func (r *PositionRepo) GetPositionsByIds(ctx context.Context, ids []uint32) ([]*userV1.Position, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	intIDs := make([]int32, 0, len(ids))
+	for _, id := range ids {
+		intIDs = append(intIDs, int32(id))
 	}
 
+	entities, err := r.q.Position.WithContext(ctx).
+		Where(r.q.Position.ID.In(intIDs...)).
+		Find()
+	if err != nil {
+		r.log.Errorf("query list failed: %s", err.Error())
+		return nil, userV1.ErrorInternalServerError("query data failed")
+	}
+
+	items := make([]*userV1.Position, 0, len(entities))
+	for _, e := range entities {
+		items = append(items, r.toDTO(e))
+	}
+	return items, nil
+}
+
+// Alias to match previous ent-style naming.
+func (r *PositionRepo) GetPositionByIds(ctx context.Context, ids []uint32) ([]*userV1.Position, error) {
+	return r.GetPositionsByIds(ctx, ids)
+}
+
+func (r *PositionRepo) toDTO(entity *model.Position) *userV1.Position {
+	if entity == nil {
+		return nil
+	}
+	dto := &userV1.Position{
+		Id:        datautil.CloneUint32(uint32(entity.ID)),
+		Name:      datautil.CloneString(entity.Name),
+		Code:      datautil.CloneString(entity.Code),
+		SortOrder: cloneInt32Ptr(&entity.SortID),
+		ParentId:  cloneUint32FromInt32(entity.ParentID),
+		Status:    stringToPositionStatus(entity.Status),
+		TenantId:  datautil.CloneUint32(toUint32(entity.TenantID)),
+		CreatedBy: datautil.CloneUint32(toUint32(entity.CreateBy)),
+		UpdatedBy: datautil.CloneUint32(toUint32(entity.UpdateBy)),
+		Remark:    cloneStringPtr(entity.Remark),
+		CreatedAt: timeutil.TimeToTimestamppb(entity.CreatedAt),
+		UpdatedAt: timeutil.TimeToTimestamppb(entity.UpdatedAt),
+		DeletedAt: timeutil.TimeToTimestamppb(entity.DeletedAt),
+	}
+	return dto
+}
+
+func positionStatusToString(status *userV1.Position_Status) *string {
+	if status == nil {
+		return nil
+	}
+	s := status.String()
+	return &s
+}
+
+func stringToPositionStatus(s *string) *userV1.Position_Status {
+	if s == nil {
+		return nil
+	}
+	if val, ok := userV1.Position_Status_value[*s]; ok {
+		enum := userV1.Position_Status(val)
+		return &enum
+	}
 	return nil
 }

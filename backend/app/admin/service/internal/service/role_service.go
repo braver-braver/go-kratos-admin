@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 
-	"entgo.io/ent/dialect/sql"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/tx7do/go-utils/trans"
 	pagination "github.com/tx7do/kratos-bootstrap/api/gen/go/pagination/v1"
@@ -25,34 +24,18 @@ type RoleService struct {
 	authorizer *data.Authorizer
 
 	roleRepo *data.RoleRepo
-
-	roleApiRepo      *data.RoleApiRepo
-	roleMenuRepo     *data.RoleMenuRepo
-	roleOrgRepo      *data.RoleOrgRepo
-	roleDeptRepo     *data.RoleDeptRepo
-	rolePositionRepo *data.RolePositionRepo
 }
 
 func NewRoleService(
 	logger log.Logger,
 	authorizer *data.Authorizer,
 	roleRepo *data.RoleRepo,
-	roleApiRepo *data.RoleApiRepo,
-	roleMenuRepo *data.RoleMenuRepo,
-	roleOrgRepo *data.RoleOrgRepo,
-	roleDeptRepo *data.RoleDeptRepo,
-	rolePositionRepo *data.RolePositionRepo,
 ) *RoleService {
 	l := log.NewHelper(log.With(logger, "module", "role/service/admin-service"))
 	svc := &RoleService{
-		log:              l,
-		authorizer:       authorizer,
-		roleRepo:         roleRepo,
-		roleApiRepo:      roleApiRepo,
-		roleMenuRepo:     roleMenuRepo,
-		roleOrgRepo:      roleOrgRepo,
-		roleDeptRepo:     roleDeptRepo,
-		rolePositionRepo: rolePositionRepo,
+		log:        l,
+		authorizer: authorizer,
+		roleRepo:   roleRepo,
 	}
 
 	svc.init()
@@ -62,7 +45,7 @@ func NewRoleService(
 
 func (s *RoleService) init() {
 	ctx := context.Background()
-	if count, _ := s.roleRepo.Count(ctx, []func(s *sql.Selector){}); count == 0 {
+	if count, _ := s.roleRepo.Count(ctx); count == 0 {
 		_ = s.createDefaultRoles(ctx)
 	}
 }

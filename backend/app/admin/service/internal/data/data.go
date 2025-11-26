@@ -1,21 +1,17 @@
 package data
 
 import (
+	"kratos-admin/app/admin/service/internal/data/gorm/query"
+	"kratos-admin/pkg/oss"
+
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/redis/go-redis/v9"
-
+	"github.com/tx7do/go-utils/password"
 	authnEngine "github.com/tx7do/kratos-authn/engine"
 	"github.com/tx7do/kratos-authn/engine/jwt"
-
-	"github.com/tx7do/go-utils/entgo"
-	"github.com/tx7do/go-utils/password"
-
 	conf "github.com/tx7do/kratos-bootstrap/api/gen/go/conf/v1"
 	redisClient "github.com/tx7do/kratos-bootstrap/cache/redis"
-
-	"kratos-admin/app/admin/service/internal/data/ent"
-
-	"kratos-admin/pkg/oss"
+	"gorm.io/gorm"
 )
 
 // Data .
@@ -23,7 +19,7 @@ type Data struct {
 	log *log.Helper
 
 	rdb *redis.Client
-	db  *entgo.EntClient[*ent.Client]
+	db  *gorm.DB
 
 	authenticator authnEngine.Authenticator
 	authorizer    *Authorizer
@@ -32,7 +28,7 @@ type Data struct {
 // NewData .
 func NewData(
 	logger log.Logger,
-	db *entgo.EntClient[*ent.Client],
+	db *gorm.DB,
 	rdb *redis.Client,
 ) (*Data, func(), error) {
 	l := log.NewHelper(log.With(logger, "module", "data/admin-service"))
@@ -44,19 +40,30 @@ func NewData(
 		rdb: rdb,
 	}
 
+	if db != nil {
+		query.SetDefault(db)
+	}
+
 	return d, func() {
 		l.Info("closing the data resources")
 
 		if d.db != nil {
-			if err := d.db.Close(); err != nil {
+			sqlDB, err := d.db.DB()
+			if err != nil {
 				l.Error(err)
+			} else {
+				if err = sqlDB.Close(); err != nil {
+					l.Error(err)
+				}
 			}
+			l.Info("data resource closed.")
 		}
 
 		if d.rdb != nil {
 			if err := d.rdb.Close(); err != nil {
 				l.Error(err)
 			}
+			l.Info("rdb closed.")
 		}
 	}, nil
 }

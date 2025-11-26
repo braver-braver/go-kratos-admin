@@ -1,256 +1,181 @@
 package data
 
 import (
-	"encoding/base64"
+	"context"
 	"fmt"
-	"regexp"
 	"testing"
-	"time"
 
-	"github.com/jinzhu/copier"
-	"github.com/stretchr/testify/assert"
-
-	"github.com/tx7do/go-utils/crypto"
-	"github.com/tx7do/go-utils/fieldmaskutil"
-	"github.com/tx7do/go-utils/timeutil"
-	"github.com/tx7do/go-utils/trans"
-
-	"google.golang.org/genproto/protobuf/field_mask"
+	"github.com/go-kratos/kratos/v2/log"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
-	"kratos-admin/app/admin/service/internal/data/ent"
-	"kratos-admin/app/admin/service/internal/data/ent/department"
-	"kratos-admin/app/admin/service/internal/data/ent/user"
-
-	authenticationV1 "kratos-admin/api/gen/go/authentication/service/v1"
+	pagination "github.com/tx7do/kratos-bootstrap/api/gen/go/pagination/v1"
 	userV1 "kratos-admin/api/gen/go/user/service/v1"
+	"kratos-admin/app/admin/service/internal/data/gorm/model"
+	"kratos-admin/app/admin/service/internal/data/gorm/query"
 )
 
-var reSpaces = regexp.MustCompile(`\s+`)
+func newTestUserRepo(t *testing.T) (*UserRepo, *gorm.DB, func()) {
+	t.Helper()
 
-func TestUserFieldMask(t *testing.T) {
-	u := &userV1.User{
-		Username: trans.String("UserName"),
-		Realname: trans.String("RealName"),
-		//Avatar:   trans.String("Avatar"),
-		Address: trans.String("Address"),
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+
+	err = db.AutoMigrate(&model.User{})
+	require.NoError(t, err)
+
+	query.SetDefault(db)
+
+	data := &Data{
+		db:  db,
+		log: log.NewHelper(log.With(log.DefaultLogger, "module", "user-repo-test")),
 	}
 
-	updateUserReq := &userV1.UpdateUserRequest{
+	repo := NewUserRepo(log.DefaultLogger, data)
+
+	cleanup := func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	}
+
+	return repo, db, cleanup
+}
+
+func createUserForTest(t *testing.T, repo *UserRepo, ctx context.Context, username string, tenant uint32) *userV1.User {
+	t.Helper()
+
+	nickname := fmt.Sprintf("nick-%s", username)
+	status := userV1.User_ON
+	authority := userV1.User_CUSTOMER_USER
+
+	req := &userV1.CreateUserRequest{
 		Data: &userV1.User{
-			Username: trans.String("UserName1"),
-			Realname: trans.String("RealName1"),
-			//Avatar:   trans.String("Avatar1"),
-			Address: trans.String("Address1"),
-		},
-		UpdateMask: &field_mask.FieldMask{
-			Paths: []string{"userName", "realName", "avatar", "roleId"},
+			Username:  &username,
+			Nickname:  &nickname,
+			Status:    &status,
+			Authority: &authority,
+			TenantId:  proto.Uint32(tenant),
 		},
 	}
-	updateUserReq.UpdateMask.Normalize()
-	if !updateUserReq.UpdateMask.IsValid(u) {
-		// Return an error.
-		panic("invalid field mask")
-	}
 
-	fieldmaskutil.Filter(updateUserReq.GetData(), updateUserReq.UpdateMask.GetPaths())
-	proto.Merge(u, updateUserReq.GetData())
+	created, err := repo.Create(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, created)
 
-	fmt.Println(reSpaces.ReplaceAllString(u.String(), " "))
+	return created
 }
 
-func TestFilterReuseMask(t *testing.T) {
-	users := []*userV1.User{
-		{
-			Id:       trans.Ptr(uint32(1)),
-			Username: trans.String("name 1"),
+func TestUserRepo_CreateAndGet(t *testing.T) {
+	repo, _, cleanup := newTestUserRepo(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	user := createUserForTest(t, repo, ctx, "alice", 1)
+
+	require.NotZero(t, user.GetId())
+	require.Equal(t, "alice", user.GetUsername())
+	require.Equal(t, userV1.User_ON, user.GetStatus())
+
+	count, err := repo.Count(ctx, query.User.Username.Eq("alice"))
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+
+	fetched, err := repo.Get(ctx, user.GetId())
+	require.NoError(t, err)
+	require.Equal(t, user.GetId(), fetched.GetId())
+	require.Equal(t, user.GetNickname(), fetched.GetNickname())
+
+	byName, err := repo.GetUserByUserName(ctx, "alice")
+	require.NoError(t, err)
+	require.Equal(t, user.GetId(), byName.GetId())
+}
+
+func TestUserRepo_UpdateWithFieldMask(t *testing.T) {
+	repo, _, cleanup := newTestUserRepo(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	user := createUserForTest(t, repo, ctx, "bob", 2)
+
+	newNickname := "updated-nick"
+	newEmail := "bob@example.com"
+
+	updateReq := &userV1.UpdateUserRequest{
+		Data: &userV1.User{
+			Id:        proto.Uint32(user.GetId()),
+			Nickname:  &newNickname,
+			Email:     &newEmail,
+			UpdatedBy: proto.Uint32(77),
 		},
-		{
-			Id:       trans.Ptr(uint32(2)),
-			Username: trans.String("name 2"),
-		},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"nickname", "email", "updated_by"}},
 	}
-	// Create a mask only once and reuse it.
-	mask := fieldmaskutil.NestedMaskFromPaths([]string{"userName", "realName", "positionId"})
-	for _, u := range users {
-		mask.Filter(u)
-	}
-	fmt.Println(users)
-	assert.Equal(t, len(users), 2)
-	// Output: [userName:"name 1" userName:"name 2"]
+
+	err := repo.Update(ctx, updateReq)
+	require.NoError(t, err)
+
+	updated, err := repo.Get(ctx, user.GetId())
+	require.NoError(t, err)
+	require.Equal(t, newNickname, updated.GetNickname())
+	require.Equal(t, newEmail, updated.GetEmail())
+	require.Equal(t, uint32(77), updated.GetUpdatedBy())
 }
 
-func TestNilValuePaths(t *testing.T) {
-	u := &userV1.User{
-		Id:       trans.Ptr(uint32(2)),
-		Username: trans.String("name 2"),
-		//RealName: trans.String(""),
+func TestUserRepo_ListWithQuery(t *testing.T) {
+	repo, _, cleanup := newTestUserRepo(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	createUserForTest(t, repo, ctx, "carol", 3)
+	createUserForTest(t, repo, ctx, "carter", 3)
+	createUserForTest(t, repo, ctx, "dave", 3)
+
+	page := int32(1)
+	pageSize := int32(20)
+	filter := "{\"username__contains\":\"car\"}"
+
+	req := &pagination.PagingRequest{
+		Page:     &page,
+		PageSize: &pageSize,
+		Query:    &filter,
+		OrderBy:  []string{"username"},
 	}
-	paths := []string{"userName", "realName", "positionId"}
-	nilPaths := fieldmaskutil.NilValuePaths(u, paths)
-	fmt.Println(nilPaths)
-	fmt.Println(u.PositionId)
+
+	resp, err := repo.List(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, uint32(2), resp.Total)
+	require.Len(t, resp.Items, 2)
+	for _, item := range resp.Items {
+		require.Contains(t, item.GetUsername(), "car")
+	}
 }
 
-func TestMessageNil(t *testing.T) {
-	u := &userV1.User{
-		Id:       trans.Ptr(uint32(2)),
-		Username: trans.String("name 2"),
-	}
+func TestUserRepo_Delete(t *testing.T) {
+	repo, db, cleanup := newTestUserRepo(t)
+	defer cleanup()
 
-	pr := u.ProtoReflect()
-	md := pr.Descriptor()
-	fd := md.Fields().ByName("userName")
-	if fd == nil {
+	ctx := context.Background()
 
-	} else {
-		fmt.Println(fd, fd.Name())
-	}
+	user := createUserForTest(t, repo, ctx, "eric", 4)
 
-	v := pr.Get(fd)
-	fmt.Println(v)
-}
+	err := repo.Delete(ctx, user.GetId())
+	require.NoError(t, err)
 
-func TestAuthEnum(t *testing.T) {
-	fmt.Println(authenticationV1.GrantType_password.String())
-	fmt.Println(authenticationV1.GrantType_client_credentials.String())
-	fmt.Println(authenticationV1.GrantType_refresh_token.String())
+	exist, err := repo.IsExist(ctx, user.GetId())
+	require.NoError(t, err)
+	require.False(t, exist)
 
-	fmt.Println(authenticationV1.TokenType_bearer.String())
-	fmt.Println(authenticationV1.TokenType_mac.String())
-}
-
-func TestDecryptAES(t *testing.T) {
-	//key的长度必须是16、24或者32字节，分别用于选择AES-128, AES-192, or AES-256
-	aesKey := crypto.DefaultAESKey
-
-	plainText := []byte("admin")
-	encryptText, err := crypto.AesEncrypt(plainText, aesKey, nil)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	pass64 := base64.StdEncoding.EncodeToString(encryptText)
-	fmt.Printf("加密后:%v\n", pass64)
-
-	bytesPass, err := base64.StdEncoding.DecodeString(pass64)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	decryptText, err := crypto.AesDecrypt(bytesPass, aesKey, nil)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	fmt.Printf("解密后:%s\n", decryptText)
-	assert.Equal(t, plainText, decryptText)
-}
-
-func TestCopier(t *testing.T) {
-	{
-		var entMsg ent.User
-		var protoMsg userV1.User
-
-		entMsg.ID = 1
-		entMsg.Username = trans.Ptr("Username")
-		entMsg.Nickname = trans.Ptr("NickName")
-		entMsg.Realname = trans.Ptr("RealName")
-		entMsg.Email = trans.Ptr("test@gmail.com")
-		entMsg.TenantID = trans.Ptr(uint32(2))
-		entMsg.Status = trans.Ptr(user.StatusOn)
-
-		_ = copier.Copy(&protoMsg, entMsg)
-		assert.Equal(t, protoMsg.GetUsername(), *entMsg.Username)
-		assert.Equal(t, protoMsg.GetNickname(), *entMsg.Nickname)
-		assert.Equal(t, protoMsg.GetRealname(), *entMsg.Realname)
-		assert.Equal(t, protoMsg.GetEmail(), *entMsg.Email)
-		assert.Equal(t, protoMsg.GetTenantId(), entMsg.TenantID)
-		assert.Equal(t, protoMsg.GetId(), entMsg.ID)
-	}
-
-	{
-		var entMsg ent.User
-		var protoMsg userV1.User
-
-		_ = copier.Copy(&entMsg, &protoMsg)
-	}
-
-	{
-		var in ent.Department
-		var out userV1.Department
-		in.Status = trans.Ptr(department.StatusOn)
-
-		_ = copier.Copy(&out, &in)
-
-		fmt.Println(out.GetStatus())
-	}
-
-	{
-		var in struct {
-			IntArray []int32
-		}
-		var out struct {
-			IntArray []int
-		}
-
-		in.IntArray = []int32{1}
-		_ = copier.Copy(&out, &in)
-		fmt.Println("IntArray: ", out.IntArray)
-
-		out.IntArray = []int{3}
-		_ = copier.Copy(&in, &out)
-		fmt.Println("IntArray: ", in.IntArray)
-	}
-
-	{
-		var in struct {
-			Int *int32
-		}
-		var out struct {
-			Int int32
-		}
-
-		in.Int = trans.Ptr(int32(1))
-		_ = copier.Copy(&out, &in)
-		fmt.Println("Int32: ", out.Int)
-
-		out.Int = 3
-		_ = copier.Copy(&in, &out)
-		fmt.Println("Int32: ", *in.Int)
-	}
-
-	{
-		var entMsg ent.User
-		var protoMsg userV1.User
-
-		entMsg.ID = 1
-		entMsg.Username = trans.Ptr("Username")
-		entMsg.Nickname = trans.Ptr("NickName")
-		entMsg.Realname = trans.Ptr("RealName")
-		entMsg.Email = trans.Ptr("test@gmail.com")
-		entMsg.CreatedAt = trans.Ptr(time.Now())
-
-		converter := copier.TypeConverter{
-			SrcType: &time.Time{},  // 源类型
-			DstType: trans.Ptr(""), // 目标类型
-			Fn: func(src interface{}) (interface{}, error) {
-				return timeutil.TimeToTimeString(src.(*time.Time)), nil
-			},
-		}
-
-		option := copier.Option{
-			Converters: []copier.TypeConverter{converter},
-		}
-
-		err := copier.CopyWithOption(&protoMsg, &entMsg, option)
-		if err != nil {
-			fmt.Println("Error:", err)
-			return
-		}
-
-		fmt.Println(protoMsg.GetUsername(), protoMsg.GetCreatedAt())
-	}
+	var count int64
+	err = db.WithContext(ctx).Table(model.TableNameUser).Count(&count).Error
+	require.NoError(t, err)
+	require.Zero(t, count)
 }

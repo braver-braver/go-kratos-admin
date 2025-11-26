@@ -2,66 +2,38 @@ package data
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
-	"entgo.io/ent/dialect/sql"
-	"github.com/go-kratos/kratos/v2/log"
+	adminV1 "kratos-admin/api/gen/go/admin/service/v1"
+	"kratos-admin/app/admin/service/internal/data/gorm/model"
+	"kratos-admin/app/admin/service/internal/data/gorm/query"
+	"kratos-admin/pkg/datautil"
 
-	"github.com/tx7do/go-utils/copierutil"
-	"github.com/tx7do/go-utils/entgo/query"
-	entgoUpdate "github.com/tx7do/go-utils/entgo/update"
-	"github.com/tx7do/go-utils/fieldmaskutil"
-	"github.com/tx7do/go-utils/mapper"
+	"github.com/go-kratos/kratos/v2/log"
 	"github.com/tx7do/go-utils/timeutil"
 	pagination "github.com/tx7do/kratos-bootstrap/api/gen/go/pagination/v1"
-
-	"kratos-admin/app/admin/service/internal/data/ent"
-	"kratos-admin/app/admin/service/internal/data/ent/task"
-
-	adminV1 "kratos-admin/api/gen/go/admin/service/v1"
 )
 
 type TaskRepo struct {
-	data *Data
-	log  *log.Helper
-
-	mapper        *mapper.CopierMapper[adminV1.Task, ent.Task]
-	typeConverter *mapper.EnumTypeConverter[adminV1.Task_Type, task.Type]
+	log *log.Helper
+	q   *query.Query
 }
 
 func NewTaskRepo(data *Data, logger log.Logger) *TaskRepo {
-	repo := &TaskRepo{
-		log:           log.NewHelper(log.With(logger, "module", "task/repo/admin-service")),
-		data:          data,
-		mapper:        mapper.NewCopierMapper[adminV1.Task, ent.Task](),
-		typeConverter: mapper.NewEnumTypeConverter[adminV1.Task_Type, task.Type](adminV1.Task_Type_name, adminV1.Task_Type_value),
+	return &TaskRepo{
+		log: log.NewHelper(log.With(logger, "module", "task/repo/admin-service")),
+		q:   query.Use(data.db),
 	}
-
-	repo.init()
-
-	return repo
 }
 
-func (r *TaskRepo) init() {
-	r.mapper.AppendConverters(copierutil.NewTimeStringConverterPair())
-	r.mapper.AppendConverters(copierutil.NewTimeTimestamppbConverterPair())
-
-	r.mapper.AppendConverters(r.typeConverter.NewConverterPair())
-}
-
-func (r *TaskRepo) Count(ctx context.Context, whereCond []func(s *sql.Selector)) (int, error) {
-	builder := r.data.db.Client().Task.Query()
-	if len(whereCond) != 0 {
-		builder.Modify(whereCond...)
-	}
-
-	count, err := builder.Count(ctx)
+func (r *TaskRepo) Count(ctx context.Context, _ []func(any)) (int, error) {
+	count, err := r.q.SysTask.WithContext(ctx).Count()
 	if err != nil {
 		r.log.Errorf("query count failed: %s", err.Error())
 		return 0, adminV1.ErrorInternalServerError("query count failed")
 	}
-
-	return count, nil
+	return int(count), nil
 }
 
 func (r *TaskRepo) List(ctx context.Context, req *pagination.PagingRequest) (*adminV1.ListTaskResponse, error) {
@@ -69,95 +41,73 @@ func (r *TaskRepo) List(ctx context.Context, req *pagination.PagingRequest) (*ad
 		return nil, adminV1.ErrorBadRequest("invalid parameter")
 	}
 
-	builder := r.data.db.Client().Task.Query()
+	builder := r.q.SysTask.WithContext(ctx).Order(r.q.SysTask.CreatedAt.Desc())
 
-	err, whereSelectors, querySelectors := entgo.BuildQuerySelector(
-		req.GetQuery(), req.GetOrQuery(),
-		req.GetPage(), req.GetPageSize(), req.GetNoPaging(),
-		req.GetOrderBy(), task.FieldCreatedAt,
-		req.GetFieldMask().GetPaths(),
-	)
-	if err != nil {
-		r.log.Errorf("parse list param error [%s]", err.Error())
-		return nil, adminV1.ErrorBadRequest("invalid query parameter")
+	if !req.GetNoPaging() {
+		ps := int(req.GetPageSize())
+		if ps <= 0 {
+			ps = 10
+		}
+		offset := int(req.GetPage()-1) * ps
+		if offset < 0 {
+			offset = 0
+		}
+		builder = builder.Offset(offset).Limit(ps)
 	}
 
-	if querySelectors != nil {
-		builder.Modify(querySelectors...)
-	}
-
-	entities, err := builder.All(ctx)
+	entities, err := builder.Find()
 	if err != nil {
 		r.log.Errorf("query list failed: %s", err.Error())
 		return nil, adminV1.ErrorInternalServerError("query list failed")
 	}
 
-	dtos := make([]*adminV1.Task, 0, len(entities))
-	for _, entity := range entities {
-		dto := r.mapper.ToDTO(entity)
-		dtos = append(dtos, dto)
+	total, err := r.q.SysTask.WithContext(ctx).Count()
+	if err != nil {
+		r.log.Errorf("query count failed: %s", err.Error())
+		return nil, adminV1.ErrorInternalServerError("query count failed")
 	}
 
-	count, err := r.Count(ctx, whereSelectors)
-	if err != nil {
-		return nil, err
+	items := make([]*adminV1.Task, 0, len(entities))
+	for _, e := range entities {
+		items = append(items, r.toDTO(e))
 	}
 
 	return &adminV1.ListTaskResponse{
-		Total: uint32(count),
-		Items: dtos,
+		Total: uint32(total),
+		Items: items,
 	}, nil
 }
 
 func (r *TaskRepo) IsExist(ctx context.Context, id uint32) (bool, error) {
-	exist, err := r.data.db.Client().Task.Query().
-		Where(task.IDEQ(id)).
-		Exist(ctx)
+	count, err := r.q.SysTask.WithContext(ctx).
+		Where(r.q.SysTask.ID.Eq(int32(id))).
+		Count()
 	if err != nil {
 		r.log.Errorf("query exist failed: %s", err.Error())
 		return false, adminV1.ErrorInternalServerError("query exist failed")
 	}
-	return exist, nil
+	return count > 0, nil
 }
 
 func (r *TaskRepo) Get(ctx context.Context, id uint32) (*adminV1.Task, error) {
-	if id == 0 {
-		return nil, adminV1.ErrorBadRequest("invalid parameter")
-	}
-
-	entity, err := r.data.db.Client().Task.Get(ctx, id)
+	entity, err := r.q.SysTask.WithContext(ctx).
+		Where(r.q.SysTask.ID.Eq(int32(id))).
+		First()
 	if err != nil {
-		if ent.IsNotFound(err) {
-			return nil, adminV1.ErrorNotFound("task not found")
-		}
-
 		r.log.Errorf("query one data failed: %s", err.Error())
-
-		return nil, adminV1.ErrorInternalServerError("query data failed")
+		return nil, adminV1.ErrorNotFound("task not found")
 	}
-
-	return r.mapper.ToDTO(entity), nil
+	return r.toDTO(entity), nil
 }
 
 func (r *TaskRepo) GetByTypeName(ctx context.Context, typeName string) (*adminV1.Task, error) {
-	if typeName == "" {
-		return nil, adminV1.ErrorBadRequest("invalid parameter")
-	}
-
-	entity, err := r.data.db.Client().Task.Query().
-		Where(task.TypeNameEQ(typeName)).
-		First(ctx)
+	entity, err := r.q.SysTask.WithContext(ctx).
+		Where(r.q.SysTask.TypeName.Eq(typeName)).
+		First()
 	if err != nil {
-		r.log.Errorf("query one data failed: %s", err.Error())
-
-		if ent.IsNotFound(err) {
-			return nil, adminV1.ErrorNotFound("task not found")
-		}
-
-		return nil, adminV1.ErrorInternalServerError("query data failed")
+		return nil, adminV1.ErrorNotFound("task not found")
 	}
-
-	return r.mapper.ToDTO(entity), nil
+	return r.toDTO(entity), nil
 }
 
 func (r *TaskRepo) Create(ctx context.Context, req *adminV1.CreateTaskRequest) (*adminV1.Task, error) {
@@ -165,35 +115,27 @@ func (r *TaskRepo) Create(ctx context.Context, req *adminV1.CreateTaskRequest) (
 		return nil, adminV1.ErrorBadRequest("invalid parameter")
 	}
 
-	builder := r.data.db.Client().Task.Create().
-		SetNillableType(r.typeConverter.ToEntity(req.Data.Type)).
-		SetNillableTypeName(req.Data.TypeName).
-		SetNillableTaskPayload(req.Data.TaskPayload).
-		SetNillableCronSpec(req.Data.CronSpec).
-		SetNillableEnable(req.Data.Enable).
-		SetNillableRemark(req.Data.Remark).
-		SetNillableCreatedBy(req.Data.CreatedBy).
-		SetNillableCreatedAt(timeutil.TimestamppbToTime(req.Data.CreatedAt))
-
-	if req.Data.CreatedAt == nil {
-		builder.SetCreatedAt(time.Now())
+	now := time.Now()
+	entity := &model.SysTask{
+		CreatedAt:   &now,
+		UpdatedAt:   &now,
+		CreateBy:    cloneInt64FromUint32(req.Data.CreatedBy),
+		UpdateBy:    cloneInt64FromUint32(req.Data.UpdatedBy),
+		Remark:      cloneStringPtr(req.Data.Remark),
+		Type:        taskTypeToString(req.Data.Type),
+		TypeName:    cloneStringPtr(req.Data.TypeName),
+		TaskPayload: cloneStringPtr(req.Data.TaskPayload),
+		CronSpec:    cloneStringPtr(req.Data.CronSpec),
+		TaskOption:  encodeTaskOption(req.Data.TaskOptions),
+		Enable:      cloneBoolPtr(req.Data.Enable),
 	}
 
-	if req.Data.TaskOptions != nil {
-		builder.SetTaskOptions(req.Data.TaskOptions)
-	}
-
-	if req.Data.Id != nil {
-		builder.SetID(req.Data.GetId())
-	}
-
-	t, err := builder.Save(ctx)
-	if err != nil {
-		r.log.Errorf("insert one data failed: %s", err.Error())
+	if err := r.q.SysTask.WithContext(ctx).Create(entity); err != nil {
+		r.log.Errorf("insert data failed: %s", err.Error())
 		return nil, adminV1.ErrorInternalServerError("insert data failed")
 	}
 
-	return r.mapper.ToDTO(t), nil
+	return r.toDTO(entity), nil
 }
 
 func (r *TaskRepo) Update(ctx context.Context, req *adminV1.UpdateTaskRequest) (*adminV1.Task, error) {
@@ -201,80 +143,118 @@ func (r *TaskRepo) Update(ctx context.Context, req *adminV1.UpdateTaskRequest) (
 		return nil, adminV1.ErrorBadRequest("invalid parameter")
 	}
 
-	// 如果不存在则创建
-	if req.GetAllowMissing() {
-		exist, err := r.IsExist(ctx, req.GetData().GetId())
-		if err != nil {
-			return nil, err
-		}
-		if !exist {
-			createReq := &adminV1.CreateTaskRequest{Data: req.Data}
-			createReq.Data.CreatedBy = createReq.Data.UpdatedBy
-			createReq.Data.UpdatedBy = nil
-			return r.Create(ctx, createReq)
-		}
+	update := map[string]any{
+		"updated_at": time.Now(),
 	}
-
-	if req.UpdateMask != nil {
-		req.UpdateMask.Normalize()
-		if !req.UpdateMask.IsValid(req.Data) {
-			r.log.Errorf("invalid field mask [%v]", req.UpdateMask)
-			return nil, adminV1.ErrorBadRequest("invalid field mask")
-		}
-		fieldmaskutil.Filter(req.GetData(), req.UpdateMask.GetPaths())
+	if req.Data.Type != nil {
+		update["type"] = req.Data.GetType().String()
 	}
-
-	builder := r.data.db.Client().
-		//Debug().
-		Task.UpdateOneID(req.Data.GetId()).
-		SetNillableType(r.typeConverter.ToEntity(req.Data.Type)).
-		SetNillableTypeName(req.Data.TypeName).
-		SetNillableTaskPayload(req.Data.TaskPayload).
-		SetNillableCronSpec(req.Data.CronSpec).
-		SetNillableEnable(req.Data.Enable).
-		SetNillableRemark(req.Data.Remark).
-		SetNillableUpdatedBy(req.Data.UpdatedBy).
-		SetNillableUpdatedAt(timeutil.TimestamppbToTime(req.Data.UpdatedAt))
-
+	if req.Data.TypeName != nil {
+		update["type_name"] = req.Data.GetTypeName()
+	}
+	if req.Data.TaskPayload != nil {
+		update["task_payload"] = req.Data.GetTaskPayload()
+	}
+	if req.Data.CronSpec != nil {
+		update["cron_spec"] = req.Data.GetCronSpec()
+	}
 	if req.Data.TaskOptions != nil {
-		builder.SetTaskOptions(req.Data.TaskOptions)
+		update["task_options"] = encodeTaskOption(req.Data.TaskOptions)
+	}
+	if req.Data.Enable != nil {
+		update["enable"] = req.Data.GetEnable()
+	}
+	if req.Data.UpdatedBy != nil {
+		update["update_by"] = req.Data.GetUpdatedBy()
+	}
+	if req.Data.Remark != nil {
+		update["remark"] = req.Data.GetRemark()
 	}
 
-	if req.Data.UpdatedAt == nil {
-		builder.SetUpdatedAt(time.Now())
-	}
-
-	if req.UpdateMask != nil {
-		nilPaths := fieldmaskutil.NilValuePaths(req.Data, req.GetUpdateMask().GetPaths())
-		nilUpdater := entgoUpdate.BuildSetNullUpdater(nilPaths)
-		if nilUpdater != nil {
-			builder.Modify(nilUpdater)
-		}
-	}
-
-	t, err := builder.Save(ctx)
+	_, err := r.q.SysTask.WithContext(ctx).
+		Where(r.q.SysTask.ID.Eq(int32(req.Data.GetId()))).
+		Updates(update)
 	if err != nil {
-		r.log.Errorf("update one data failed: %s", err.Error())
+		r.log.Errorf("update data failed: %s", err.Error())
 		return nil, adminV1.ErrorInternalServerError("update data failed")
 	}
 
-	return r.mapper.ToDTO(t), nil
+	return r.Get(ctx, req.Data.GetId())
 }
 
 func (r *TaskRepo) Delete(ctx context.Context, req *adminV1.DeleteTaskRequest) error {
 	if req == nil {
 		return adminV1.ErrorBadRequest("invalid parameter")
 	}
-
-	if err := r.data.db.Client().Task.DeleteOneID(req.GetId()).Exec(ctx); err != nil {
-		if ent.IsNotFound(err) {
-			return adminV1.ErrorNotFound("task not found")
-		}
-
-		r.log.Errorf("delete one data failed: %s", err.Error())
-
-		return adminV1.ErrorInternalServerError("delete failed")
+	_, err := r.q.SysTask.WithContext(ctx).
+		Where(r.q.SysTask.ID.Eq(int32(req.GetId()))).
+		Delete()
+	if err != nil {
+		r.log.Errorf("delete data failed: %s", err.Error())
+		return adminV1.ErrorInternalServerError("delete data failed")
 	}
-
 	return nil
+}
+
+func (r *TaskRepo) toDTO(entity *model.SysTask) *adminV1.Task {
+	if entity == nil {
+		return nil
+	}
+	return &adminV1.Task{
+		Id:          datautil.CloneUint32(uint32(entity.ID)),
+		Type:        stringToTaskType(entity.Type),
+		TypeName:    cloneStringPtr(entity.TypeName),
+		TaskPayload: cloneStringPtr(entity.TaskPayload),
+		TaskOptions: decodeTaskOption(entity.TaskOption),
+		CronSpec:    cloneStringPtr(entity.CronSpec),
+		Enable:      cloneBoolPtr(entity.Enable),
+		Remark:      cloneStringPtr(entity.Remark),
+		CreatedBy:   datautil.CloneUint32(toUint32(entity.CreateBy)),
+		UpdatedBy:   datautil.CloneUint32(toUint32(entity.UpdateBy)),
+		CreatedAt:   timeutil.TimeToTimestamppb(entity.CreatedAt),
+		UpdatedAt:   timeutil.TimeToTimestamppb(entity.UpdatedAt),
+		DeletedAt:   timeutil.TimeToTimestamppb(entity.DeletedAt),
+	}
+}
+
+func stringToTaskType(s *string) *adminV1.Task_Type {
+	if s == nil {
+		return nil
+	}
+	if v, ok := adminV1.Task_Type_value[*s]; ok {
+		val := adminV1.Task_Type(v)
+		return &val
+	}
+	return nil
+}
+
+func taskTypeToString(tp *adminV1.Task_Type) *string {
+	if tp == nil {
+		return nil
+	}
+	s := tp.String()
+	return &s
+}
+
+func encodeTaskOption(option *adminV1.TaskOption) *string {
+	if option == nil {
+		return nil
+	}
+	bytes, err := json.Marshal(option)
+	if err != nil {
+		return nil
+	}
+	str := string(bytes)
+	return &str
+}
+
+func decodeTaskOption(raw *string) *adminV1.TaskOption {
+	if raw == nil {
+		return nil
+	}
+	var opt adminV1.TaskOption
+	if err := json.Unmarshal([]byte(*raw), &opt); err != nil {
+		return nil
+	}
+	return &opt
 }

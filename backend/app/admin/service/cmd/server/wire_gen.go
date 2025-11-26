@@ -21,9 +21,9 @@ import (
 // initApp init kratos application.
 func initApp(logger log.Logger, registrar registry.Registrar, bootstrap *v1.Bootstrap) (*kratos.App, func(), error) {
 	authenticator := data.NewAuthenticator(bootstrap)
-	entClient := data.NewEntClient(bootstrap, logger)
 	client := data.NewRedisClient(bootstrap, logger)
-	dataData, cleanup, err := data.NewData(logger, entClient, client)
+	gormDB := data.NewGormClient(bootstrap, logger)
+	dataData, cleanup, err := data.NewData(logger, gormDB, client)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -41,19 +41,12 @@ func initApp(logger log.Logger, registrar registry.Registrar, bootstrap *v1.Boot
 	positionRepo := data.NewPositionRepo(dataData, logger)
 	departmentRepo := data.NewDepartmentRepo(dataData, logger)
 	organizationRepo := data.NewOrganizationRepo(dataData, logger)
-	userRoleRepo := data.NewUserRoleRepo(dataData, logger)
-	userPositionRepo := data.NewUserPositionRepo(dataData, logger)
-	userService := service.NewUserService(logger, userRepo, roleRepo, userCredentialRepo, positionRepo, departmentRepo, organizationRepo, tenantRepo, userRoleRepo, userPositionRepo)
+	userService := service.NewUserService(logger, userRepo, roleRepo, userCredentialRepo, positionRepo, departmentRepo, organizationRepo, tenantRepo)
 	menuRepo := data.NewMenuRepo(dataData, logger)
 	menuService := service.NewMenuService(logger, menuRepo)
 	routerService := service.NewRouterService(logger, menuRepo, roleRepo, userRepo)
 	organizationService := service.NewOrganizationService(logger, organizationRepo, userRepo)
-	roleApiRepo := data.NewRoleApiRepo(dataData, logger)
-	roleMenuRepo := data.NewRoleMenuRepo(dataData, logger)
-	roleOrgRepo := data.NewRoleOrgRepo(dataData, logger)
-	roleDeptRepo := data.NewRoleDeptRepo(dataData, logger)
-	rolePositionRepo := data.NewRolePositionRepo(dataData, logger)
-	roleService := service.NewRoleService(logger, authorizer, roleRepo, roleApiRepo, roleMenuRepo, roleOrgRepo, roleDeptRepo, rolePositionRepo)
+	roleService := service.NewRoleService(logger, authorizer, roleRepo)
 	positionService := service.NewPositionService(logger, positionRepo, departmentRepo, organizationRepo)
 	dictTypeRepo := data.NewDictTypeRepo(dataData, logger)
 	dictEntryRepo := data.NewDictEntryRepo(dataData, logger)

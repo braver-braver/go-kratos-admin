@@ -78,7 +78,7 @@ func (s *PositionService) Get(ctx context.Context, req *userV1.GetPositionReques
 	}
 
 	if resp.DepartmentId != nil {
-		department, err := s.departmentRepo.Get(ctx, &userV1.GetDepartmentRequest{Id: resp.GetDepartmentId()})
+		department, err := s.departmentRepo.Get(ctx, resp.GetDepartmentId())
 		if err == nil && department != nil {
 			resp.DepartmentName = department.Name
 		} else {
@@ -102,7 +102,7 @@ func (s *PositionService) Create(ctx context.Context, req *userV1.CreatePosition
 
 	req.Data.CreatedBy = trans.Ptr(operator.UserId)
 
-	if err = s.positionRepo.Create(ctx, req); err != nil {
+	if _, err = s.positionRepo.Create(ctx, req); err != nil {
 		return nil, err
 	}
 
@@ -130,7 +130,7 @@ func (s *PositionService) Update(ctx context.Context, req *userV1.UpdatePosition
 }
 
 func (s *PositionService) Delete(ctx context.Context, req *userV1.DeletePositionRequest) (*emptypb.Empty, error) {
-	if err := s.positionRepo.Delete(ctx, req); err != nil {
+	if err := s.positionRepo.Delete(ctx, req.GetId()); err != nil {
 		return nil, err
 	}
 

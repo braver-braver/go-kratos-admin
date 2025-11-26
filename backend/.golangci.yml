@@ -1,0 +1,489 @@
+# GolangCI-Lint configuration tailored for kratos-admin backend
+# Reference baseline adapted from shared template; targets Go 1.25.x
+
+run:
+  concurrency: 8
+  timeout: 5m
+  issues-exit-code: 1
+  tests: false
+  build-tags: []
+  skip-dirs:
+    - util
+    - .*~
+    - api/swagger/docs
+  skip-dirs-use-default: true
+  skip-files:
+    - ".*\\.my\\.go$"
+  allow-parallel-runners: true
+  go: "1.25.3"
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  uniq-by-line: true
+  path-prefix: ""
+  sort-results: true
+
+linters-settings:
+  bidichk:
+    left-to-right-embedding: true
+    right-to-left-embedding: true
+    pop-directional-formatting: true
+    left-to-right-override: true
+    right-to-left-override: true
+    left-to-right-isolate: true
+    right-to-left-isolate: true
+    first-strong-isolate: true
+    pop-directional-isolate: true
+  dogsled:
+    max-blank-identifiers: 2
+  dupl:
+    threshold: 100
+  errcheck:
+    check-type-assertions: false
+    check-blank: false
+  errorlint:
+    errorf: true
+    asserts: false
+    comparison: true
+  exhaustive:
+    check-generated: false
+    default-signifies-exhaustive: true
+    ignore-enum-members: ""
+    package-scope-only: false
+  exhaustivestruct:
+    struct-patterns:
+      - "*.Test"
+      - "*.Test2"
+      - "*.Embedded"
+      - "*.External"
+  forbidigo:
+    forbid:
+      - ginkgo\\.F.*
+    exclude_godoc_examples: false
+  funlen:
+    lines: 150
+    statements: 50
+  gci:
+    prefix: kratos-admin
+  gocognit:
+    min-complexity: 30
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+    ignore-tests: false
+    match-constant: true
+    numbers: false
+    min: 3
+    max: 3
+    ignore-calls: true
+  gocritic:
+    enabled-checks:
+      - nestingreduce
+      - truncatecmp
+      - unnamedresult
+      - ruleguard
+    disabled-checks:
+      - regexpMust
+      - ifElseChain
+    enabled-tags:
+      - performance
+    disabled-tags:
+      - experimental
+    settings:
+      captLocal:
+        paramsOnly: true
+      elseif:
+        skipBalanced: true
+      hugeParam:
+        sizeThreshold: 80
+      nestingReduce:
+        bodyWidth: 5
+      rangeExprCopy:
+        sizeThreshold: 512
+        skipTestFuncs: true
+      rangeValCopy:
+        sizeThreshold: 32
+        skipTestFuncs: true
+      ruleguard:
+        rules: ""
+      truncateCmp:
+        skipArchDependent: true
+      underef:
+        skipRecvDeref: true
+      unnamedResult:
+        checkExported: true
+  gocyclo:
+    min-complexity: 30
+  cyclop:
+    max-complexity: 50
+    package-average: 0.0
+    skip-tests: false
+  godot:
+    scope: declarations
+    exclude: []
+    capital: false
+  godox:
+    keywords:
+      - BUG
+      - FIXME
+      - OPTIMIZE
+      - HACK
+  gofmt:
+    simplify: true
+  gofumpt:
+    lang-version: "1.25.3"
+    extra-rules: false
+  goheader:
+    values:
+      const: {}
+      regexp: {}
+    template: ""
+    template-path:
+  goimports:
+    local-prefixes: kratos-admin
+  golint:
+    min-confidence: 0.9
+  gomnd:
+    settings:
+      mnd:
+        checks: argument,case,condition,operation,return,assign
+  gomoddirectives:
+    replace-local: true
+    retract-allow-no-explanation: false
+    exclude-forbidden: false
+  gomodguard:
+    allowed:
+      modules:
+        - gorm.io/gorm
+        - gorm.io/driver/mysql
+        - go.opencensus.io
+      domains:
+        - google.golang.org
+        - gopkg.in
+        - golang.org
+        - github.com
+        - go.uber.org
+        - go.etcd.io
+        - gorm.io
+        - go.opentelemetry.io
+        - sigs.k8s.io
+        - go.mongodb.org
+    blocked:
+      modules:
+        - github.com/pkg/errors:
+            recommendations:
+              - github.com/go-kratos/kratos/v2/errors
+            reason: "use kratos errors"
+      versions:
+        - github.com/MakeNowJust/heredoc:
+            version: "> 2.0.9"
+            reason: "use latest"
+      local_replace_directives: false
+  gosec:
+    includes:
+      - G401
+      - G306
+      - G101
+    excludes:
+      - G204
+    exclude-generated: true
+    severity: "low"
+    confidence: "low"
+    config:
+      G306: "0600"
+      G101:
+        pattern: "(?i)example"
+        ignore_entropy: false
+        entropy_threshold: "80.0"
+        per_char_threshold: "3.0"
+        truncate: "32"
+  gosimple:
+    go: "1.15"
+    checks: ["all"]
+  govet:
+    check-shadowing: false
+    settings:
+      printf:
+        funcs:
+          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Infof
+          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Warnf
+          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Errorf
+          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Fatalf
+    enable:
+      - atomicalign
+    disable:
+      - shadow
+  depguard:
+    list-type: blacklist
+    include-go-root: false
+  ifshort:
+    max-decl-lines: 1
+    max-decl-chars: 30
+  importas:
+    no-unaliased: false
+    alias: []
+  ireturn:
+    allow:
+      - anon
+      - error
+      - empty
+      - stdlib
+      - "(or|er)$"
+    reject:
+      - github.com\\/user\\/package\\/v4\\.Type
+  lll:
+    line-length: 400
+    tab-width: 4
+  maligned:
+    suggest-new: true
+  misspell:
+    locale: US
+    ignore-words:
+      - someword
+  nakedret:
+    max-func-lines: 30
+  nestif:
+    min-complexity: 4
+  nilnil:
+    checked-types:
+      - ptr
+      - func
+      - iface
+      - map
+      - chan
+  nlreturn:
+    block-size: 1
+  nolintlint:
+    allow-unused: false
+    allow-leading-space: true
+    allow-no-explanation: []
+    require-explanation: false
+    require-specific: true
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: false
+  promlinter:
+    strict: false
+    disabled-linters: []
+  predeclared:
+    ignore: ""
+    q: false
+  rowserrcheck:
+    packages:
+      - github.com/jmoiron/sqlx
+  revive:
+    ignore-generated-header: true
+    severity: warning
+    rules:
+      - name: indent-error-flow
+        severity: warning
+  staticcheck:
+    go: "1.16"
+    checks: ["all"]
+  stylecheck:
+    go: "1.16"
+    checks: ["all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022"]
+    dot-import-whitelist:
+      - fmt
+    initialisms: ["ACL", "API", "ASCII", "CPU", "CSS", "DNS", "EOF", "GUID", "HTML", "HTTP", "HTTPS", "ID", "IP", "JSON", "QPS", "RAM", "RPC", "SLA", "SMTP", "SQL", "SSH", "TCP", "TLS", "TTL", "UDP", "UI", "GID", "UID", "UUID", "URI", "URL", "UTF8", "VM", "XML", "XMPP", "XSRF", "XSS"]
+    http-status-code-whitelist: ["200", "400", "404", "500"]
+  tagliatelle:
+    case:
+      use-field-name: true
+      rules:
+        json: camel
+        yaml: camel
+        xml: camel
+        bson: camel
+        avro: snake
+        mapstructure: kebab
+  testpackage:
+    skip-regexp: (id|export|internal)_test\\.go
+  thelper:
+    test:
+      first: true
+      name: true
+      begin: true
+    benchmark:
+      first: true
+      name: true
+      begin: true
+    tb:
+      first: true
+      name: true
+      begin: true
+  tenv:
+    all: false
+  unparam:
+    check-exported: false
+  unused:
+    check-exported: false
+  whitespace:
+    multi-if: false
+    multi-func: false
+  wrapcheck:
+    ignoreSigs:
+      - .Errorf(
+      - errors.New(
+      - errors.Unwrap(
+      - .Wrap(
+      - .Wrapf(
+      - .WithMessage(
+      - .WithMessagef(
+      - .WithStack(
+    ignorePackageGlobs:
+      - encoding/*
+      - github.com/pkg/*
+  wsl:
+    strict-append: true
+    allow-assign-and-call: true
+    allow-assign-and-anything: false
+    allow-multiline-assign: true
+    allow-cuddle-declarations: false
+    allow-trailing-comment: false
+    force-case-trailing-whitespace: 0
+    force-err-cuddling: false
+    allow-separated-leading-comment: false
+  makezero:
+    always: false
+
+linters:
+  disable-all: true
+  enable:
+    - asciicheck
+    - bodyclose
+    - cyclop
+    - dogsled
+    - dupl
+    - durationcheck
+    - errorlint
+    - forbidigo
+    - funlen
+    - gocognit
+    - goconst
+    - gocyclo
+    - godot
+    - godox
+    - goheader
+    - gomoddirectives
+    - gomodguard
+    - goprintffuncname
+    - gosec
+    - govet
+    - importas
+    - ineffassign
+    - makezero
+    - misspell
+    - nakedret
+    - nestif
+    - nilerr
+    - noctx
+    - nolintlint
+    - paralleltest
+    - prealloc
+    - predeclared
+    - revive
+    - staticcheck
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - unused
+    - whitespace
+    - bidichk
+    - nosprintfhostport
+    - grouper
+    - decorder
+    - maintidx
+    - asasalint
+    - dupword
+    - ginkgolinter
+    - gocheckcompilerdirectives
+    - gocritic
+    - interfacebloat
+    - loggercheck
+    - musttag
+    - reassign
+    - testableexamples
+    - testpackage
+    - usestdlibvars
+  fast: false
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+
+issues:
+  exclude:
+    - tools/.*
+    - test/.*
+    - third_party/.*
+    - internal/controller/namespace/.*
+    - manifests/.*
+    - pkg/generated/.*
+  exclude-rules:
+    - linters:
+        - unused
+        - stylecheck
+        - importas
+        - unparam
+      path: (controller/minerset/.*|controller/miner/.*|controller/namespace/.*)\\.go
+    - linters:
+        - errcheck
+      path: (printers/internalversion/.*)\\.go
+    - linters:
+        - unconvert
+      path: (tools/.*)\\.go
+    - linters:
+        - promlinter
+      path: (metrics/.*)\\.go
+    - linters:
+        - importas
+      path: (cmd/.*|pkg/printers/internalversion/.*)\\.go
+    - path: (cmd/.*|store/.*)\\.go
+      linters:
+        - dupl
+    - linters:
+        - gocritic
+      text: (hugeParam:|rangeValCopy:)
+    - linters:
+        - staticcheck
+      text: "SA9003:"
+    - linters:
+        - lll
+      source: "^//go:generate "
+  exclude-use-default: true
+  exclude-case-sensitive: false
+  include:
+    - EXC0001
+    - EXC0002
+    - EXC0003
+    - EXC0004
+    - EXC0005
+    - EXC0006
+    - EXC0007
+    - EXC0008
+    - EXC0009
+    - EXC0010
+    - EXC0011
+    - EXC0012
+    - EXC0013
+    - EXC0014
+    - EXC0015
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false
+  fix: false
+
+severity:
+  default: error
+  rules:
+    - linters:
+        - dupl
+      severity: info
+
+version: "2"

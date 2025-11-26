@@ -1,0 +1,6 @@
+{
+  "driver": "postgres",
+  "dsn": "host=localhost user=gorm password=gorm dbname=gorm port=9920 sslmode=disable",
+  "out": "app/admin/service/internal/data/gorm",
+  "with_json_tag": true
+}

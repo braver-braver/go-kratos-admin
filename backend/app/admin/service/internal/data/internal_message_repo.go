@@ -4,67 +4,36 @@ import (
 	"context"
 	"time"
 
-	"entgo.io/ent/dialect/sql"
-	"github.com/go-kratos/kratos/v2/log"
+	internalMessageV1 "kratos-admin/api/gen/go/internal_message/service/v1"
+	"kratos-admin/app/admin/service/internal/data/gorm/model"
+	"kratos-admin/app/admin/service/internal/data/gorm/query"
+	"kratos-admin/pkg/datautil"
 
-	"github.com/tx7do/go-utils/copierutil"
-	entgo "github.com/tx7do/go-utils/entgo/query"
-	entgoUpdate "github.com/tx7do/go-utils/entgo/update"
-	"github.com/tx7do/go-utils/fieldmaskutil"
-	"github.com/tx7do/go-utils/mapper"
+	"github.com/go-kratos/kratos/v2/log"
 	"github.com/tx7do/go-utils/timeutil"
 	pagination "github.com/tx7do/kratos-bootstrap/api/gen/go/pagination/v1"
-
-	"kratos-admin/app/admin/service/internal/data/ent"
-	"kratos-admin/app/admin/service/internal/data/ent/internalmessage"
-
-	internalMessageV1 "kratos-admin/api/gen/go/internal_message/service/v1"
 )
 
+// InternalMessageRepo uses GORM to manage notification messages (formerly Ent).
 type InternalMessageRepo struct {
-	data *Data
-	log  *log.Helper
-
-	mapper          *mapper.CopierMapper[internalMessageV1.InternalMessage, ent.InternalMessage]
-	statusConverter *mapper.EnumTypeConverter[internalMessageV1.InternalMessage_Status, internalmessage.Status]
-	typeConverter   *mapper.EnumTypeConverter[internalMessageV1.InternalMessage_Type, internalmessage.Type]
+	log *log.Helper
+	q   *query.Query
 }
 
 func NewInternalMessageRepo(data *Data, logger log.Logger) *InternalMessageRepo {
-	repo := &InternalMessageRepo{
-		log:             log.NewHelper(log.With(logger, "module", "internal-message/repo/admin-service")),
-		data:            data,
-		mapper:          mapper.NewCopierMapper[internalMessageV1.InternalMessage, ent.InternalMessage](),
-		statusConverter: mapper.NewEnumTypeConverter[internalMessageV1.InternalMessage_Status, internalmessage.Status](internalMessageV1.InternalMessage_Status_name, internalMessageV1.InternalMessage_Status_value),
-		typeConverter:   mapper.NewEnumTypeConverter[internalMessageV1.InternalMessage_Type, internalmessage.Type](internalMessageV1.InternalMessage_Type_name, internalMessageV1.InternalMessage_Type_value),
+	return &InternalMessageRepo{
+		log: log.NewHelper(log.With(logger, "module", "internal-message/repo/admin-service")),
+		q:   query.Use(data.db),
 	}
-
-	repo.init()
-
-	return repo
 }
 
-func (r *InternalMessageRepo) init() {
-	r.mapper.AppendConverters(copierutil.NewTimeStringConverterPair())
-	r.mapper.AppendConverters(copierutil.NewTimeTimestamppbConverterPair())
-
-	r.mapper.AppendConverters(r.statusConverter.NewConverterPair())
-	r.mapper.AppendConverters(r.typeConverter.NewConverterPair())
-}
-
-func (r *InternalMessageRepo) Count(ctx context.Context, whereCond []func(s *sql.Selector)) (int, error) {
-	builder := r.data.db.Client().InternalMessage.Query()
-	if len(whereCond) != 0 {
-		builder.Modify(whereCond...)
-	}
-
-	count, err := builder.Count(ctx)
+func (r *InternalMessageRepo) Count(ctx context.Context, _ []func(any)) (int, error) {
+	count, err := r.q.NotificationMessage.WithContext(ctx).Count()
 	if err != nil {
 		r.log.Errorf("query count failed: %s", err.Error())
 		return 0, internalMessageV1.ErrorInternalServerError("query count failed")
 	}
-
-	return count, nil
+	return int(count), nil
 }
 
 func (r *InternalMessageRepo) List(ctx context.Context, req *pagination.PagingRequest) (*internalMessageV1.ListInternalMessageResponse, error) {
@@ -72,74 +41,66 @@ func (r *InternalMessageRepo) List(ctx context.Context, req *pagination.PagingRe
 		return nil, internalMessageV1.ErrorBadRequest("invalid parameter")
 	}
 
-	builder := r.data.db.Client().InternalMessage.Query()
+	builder := r.q.NotificationMessage.WithContext(ctx).Order(r.q.NotificationMessage.CreatedAt.Desc())
 
-	err, whereSelectors, querySelectors := entgo.BuildQuerySelector(
-		req.GetQuery(), req.GetOrQuery(),
-		req.GetPage(), req.GetPageSize(), req.GetNoPaging(),
-		req.GetOrderBy(), internalmessage.FieldCreatedAt,
-		req.GetFieldMask().GetPaths(),
-	)
-	if err != nil {
-		r.log.Errorf("parse list param error [%s]", err.Error())
-		return nil, internalMessageV1.ErrorBadRequest("invalid query parameter")
+	if !req.GetNoPaging() {
+		ps := int(req.GetPageSize())
+		if ps <= 0 {
+			ps = 10
+		}
+		offset := int(req.GetPage()-1) * ps
+		if offset < 0 {
+			offset = 0
+		}
+		builder = builder.Offset(offset).Limit(ps)
 	}
 
-	if querySelectors != nil {
-		builder.Modify(querySelectors...)
-	}
-
-	entities, err := builder.All(ctx)
+	entities, err := builder.Find()
 	if err != nil {
 		r.log.Errorf("query list failed: %s", err.Error())
 		return nil, internalMessageV1.ErrorInternalServerError("query list failed")
 	}
 
-	dtos := make([]*internalMessageV1.InternalMessage, 0, len(entities))
-	for _, entity := range entities {
-		dto := r.mapper.ToDTO(entity)
-		dtos = append(dtos, dto)
+	total, err := r.q.NotificationMessage.WithContext(ctx).Count()
+	if err != nil {
+		r.log.Errorf("query count failed: %s", err.Error())
+		return nil, internalMessageV1.ErrorInternalServerError("query count failed")
 	}
 
-	count, err := r.Count(ctx, whereSelectors)
-	if err != nil {
-		return nil, err
+	items := make([]*internalMessageV1.InternalMessage, 0, len(entities))
+	for _, e := range entities {
+		items = append(items, r.toDTO(e))
 	}
 
 	return &internalMessageV1.ListInternalMessageResponse{
-		Total: uint32(count),
-		Items: dtos,
-	}, err
+		Total: uint32(total),
+		Items: items,
+	}, nil
 }
 
 func (r *InternalMessageRepo) IsExist(ctx context.Context, id uint32) (bool, error) {
-	exist, err := r.data.db.Client().InternalMessage.Query().
-		Where(internalmessage.IDEQ(id)).
-		Exist(ctx)
+	count, err := r.q.NotificationMessage.WithContext(ctx).
+		Where(r.q.NotificationMessage.ID.Eq(int32(id))).
+		Count()
 	if err != nil {
 		r.log.Errorf("query exist failed: %s", err.Error())
 		return false, internalMessageV1.ErrorInternalServerError("query exist failed")
 	}
-	return exist, nil
+	return count > 0, nil
 }
 
 func (r *InternalMessageRepo) Get(ctx context.Context, req *internalMessageV1.GetInternalMessageRequest) (*internalMessageV1.InternalMessage, error) {
 	if req == nil {
 		return nil, internalMessageV1.ErrorBadRequest("invalid parameter")
 	}
-
-	entity, err := r.data.db.Client().InternalMessage.Get(ctx, req.GetId())
+	entity, err := r.q.NotificationMessage.WithContext(ctx).
+		Where(r.q.NotificationMessage.ID.Eq(int32(req.GetId()))).
+		First()
 	if err != nil {
-		if ent.IsNotFound(err) {
-			return nil, internalMessageV1.ErrorNotFound("message not found")
-		}
-
 		r.log.Errorf("query one data failed: %s", err.Error())
-
-		return nil, internalMessageV1.ErrorInternalServerError("query data failed")
+		return nil, internalMessageV1.ErrorNotFound("message not found")
 	}
-
-	return r.mapper.ToDTO(entity), nil
+	return r.toDTO(entity), nil
 }
 
 func (r *InternalMessageRepo) Create(ctx context.Context, req *internalMessageV1.CreateInternalMessageRequest) (*internalMessageV1.InternalMessage, error) {
@@ -147,32 +108,23 @@ func (r *InternalMessageRepo) Create(ctx context.Context, req *internalMessageV1
 		return nil, internalMessageV1.ErrorBadRequest("invalid parameter")
 	}
 
-	builder := r.data.db.Client().InternalMessage.Create().
-		SetNillableTitle(req.Data.Title).
-		SetNillableContent(req.Data.Content).
-		SetNillableSenderID(req.Data.SenderId).
-		SetNillableCategoryID(req.Data.CategoryId).
-		SetNillableStatus(r.statusConverter.ToEntity(req.Data.Status)).
-		SetNillableType(r.typeConverter.ToEntity(req.Data.Type)).
-		SetNillableCreatedBy(req.Data.CreatedBy).
-		SetNillableCreatedAt(timeutil.TimestamppbToTime(req.Data.CreatedAt))
-
-	if req.Data.CreatedAt == nil {
-		builder.SetCreatedAt(time.Now())
+	now := time.Now()
+	entity := &model.NotificationMessage{
+		CreatedAt:  &now,
+		UpdatedAt:  &now,
+		CreateBy:   cloneInt64FromUint32(req.Data.CreatedBy),
+		UpdateBy:   cloneInt64FromUint32(req.Data.UpdatedBy),
+		Subject:    cloneStringPtr(req.Data.Title),
+		Content:    cloneStringPtr(req.Data.Content),
+		CategoryID: cloneInt64FromUint32(req.Data.CategoryId),
+		Status:     messageStatusToString(req.Data.Status),
 	}
 
-	if req.Data.Id != nil {
-		builder.SetID(req.Data.GetId())
-	}
-
-	var err error
-	var entity *ent.InternalMessage
-	if entity, err = builder.Save(ctx); err != nil {
-		r.log.Errorf("insert one data failed: %s", err.Error())
+	if err := r.q.NotificationMessage.WithContext(ctx).Create(entity); err != nil {
+		r.log.Errorf("insert data failed: %s", err.Error())
 		return nil, internalMessageV1.ErrorInternalServerError("insert data failed")
 	}
-
-	return r.mapper.ToDTO(entity), nil
+	return r.toDTO(entity), nil
 }
 
 func (r *InternalMessageRepo) Update(ctx context.Context, req *internalMessageV1.UpdateInternalMessageRequest) error {
@@ -180,74 +132,79 @@ func (r *InternalMessageRepo) Update(ctx context.Context, req *internalMessageV1
 		return internalMessageV1.ErrorBadRequest("invalid parameter")
 	}
 
-	// 如果不存在则创建
-	if req.GetAllowMissing() {
-		exist, err := r.IsExist(ctx, req.GetData().GetId())
-		if err != nil {
-			return err
-		}
-		if !exist {
-			createReq := &internalMessageV1.CreateInternalMessageRequest{Data: req.Data}
-			createReq.Data.CreatedBy = createReq.Data.UpdatedBy
-			createReq.Data.UpdatedBy = nil
-			_, err = r.Create(ctx, createReq)
-			return err
-		}
+	update := map[string]any{
+		"updated_at": time.Now(),
+	}
+	if req.Data.Title != nil {
+		update["subject"] = req.Data.GetTitle()
+	}
+	if req.Data.Content != nil {
+		update["content"] = req.Data.GetContent()
+	}
+	if req.Data.CategoryId != nil {
+		update["category_id"] = req.Data.GetCategoryId()
+	}
+	if req.Data.Status != nil {
+		update["status"] = req.Data.GetStatus().String()
+	}
+	if req.Data.UpdatedBy != nil {
+		update["update_by"] = req.Data.GetUpdatedBy()
 	}
 
-	if req.UpdateMask != nil {
-		req.UpdateMask.Normalize()
-		if !req.UpdateMask.IsValid(req.Data) {
-			r.log.Errorf("invalid field mask [%v]", req.UpdateMask)
-			return internalMessageV1.ErrorBadRequest("invalid field mask")
-		}
-		fieldmaskutil.Filter(req.GetData(), req.UpdateMask.GetPaths())
-	}
-
-	builder := r.data.db.Client().InternalMessage.UpdateOneID(req.Data.GetId()).
-		SetNillableTitle(req.Data.Title).
-		SetNillableContent(req.Data.Content).
-		SetNillableSenderID(req.Data.SenderId).
-		SetNillableCategoryID(req.Data.CategoryId).
-		SetNillableStatus(r.statusConverter.ToEntity(req.Data.Status)).
-		SetNillableType(r.typeConverter.ToEntity(req.Data.Type)).
-		SetNillableUpdatedBy(req.Data.UpdatedBy).
-		SetNillableUpdatedAt(timeutil.TimestamppbToTime(req.Data.UpdatedAt))
-
-	if req.Data.UpdatedAt == nil {
-		builder.SetUpdatedAt(time.Now())
-	}
-
-	if req.UpdateMask != nil {
-		nilPaths := fieldmaskutil.NilValuePaths(req.Data, req.GetUpdateMask().GetPaths())
-		nilUpdater := entgoUpdate.BuildSetNullUpdater(nilPaths)
-		if nilUpdater != nil {
-			builder.Modify(nilUpdater)
-		}
-	}
-
-	if err := builder.Exec(ctx); err != nil {
-		r.log.Errorf("update one data failed: %s", err.Error())
+	_, err := r.q.NotificationMessage.WithContext(ctx).
+		Where(r.q.NotificationMessage.ID.Eq(int32(req.Data.GetId()))).
+		Updates(update)
+	if err != nil {
+		r.log.Errorf("update data failed: %s", err.Error())
 		return internalMessageV1.ErrorInternalServerError("update data failed")
 	}
-
 	return nil
 }
 
 func (r *InternalMessageRepo) Delete(ctx context.Context, id uint32) error {
-	if id == 0 {
-		return internalMessageV1.ErrorBadRequest("invalid parameter")
+	_, err := r.q.NotificationMessage.WithContext(ctx).
+		Where(r.q.NotificationMessage.ID.Eq(int32(id))).
+		Delete()
+	if err != nil {
+		r.log.Errorf("delete data failed: %s", err.Error())
+		return internalMessageV1.ErrorInternalServerError("delete data failed")
 	}
+	return nil
+}
 
-	if err := r.data.db.Client().InternalMessage.DeleteOneID(id).Exec(ctx); err != nil {
-		if ent.IsNotFound(err) {
-			return internalMessageV1.ErrorNotFound("internal message not found")
-		}
-
-		r.log.Errorf("delete one data failed: %s", err.Error())
-
-		return internalMessageV1.ErrorInternalServerError("delete failed")
+func (r *InternalMessageRepo) toDTO(entity *model.NotificationMessage) *internalMessageV1.InternalMessage {
+	if entity == nil {
+		return nil
 	}
+	return &internalMessageV1.InternalMessage{
+		Id:         datautil.CloneUint32(uint32(entity.ID)),
+		Title:      cloneStringPtr(entity.Subject),
+		Content:    cloneStringPtr(entity.Content),
+		CategoryId: datautil.CloneUint32(toUint32(entity.CategoryID)),
+		Status:     stringToInternalMessageStatus(entity.Status),
+		CreatedBy:  datautil.CloneUint32(toUint32(entity.CreateBy)),
+		UpdatedBy:  datautil.CloneUint32(toUint32(entity.UpdateBy)),
+		CreatedAt:  timeutil.TimeToTimestamppb(entity.CreatedAt),
+		UpdatedAt:  timeutil.TimeToTimestamppb(entity.UpdatedAt),
+		DeletedAt:  timeutil.TimeToTimestamppb(entity.DeletedAt),
+	}
+}
 
+func messageStatusToString(v *internalMessageV1.InternalMessage_Status) *string {
+	if v == nil {
+		return nil
+	}
+	s := v.String()
+	return &s
+}
+
+func stringToInternalMessageStatus(s *string) *internalMessageV1.InternalMessage_Status {
+	if s == nil {
+		return nil
+	}
+	if v, ok := internalMessageV1.InternalMessage_Status_value[*s]; ok {
+		val := internalMessageV1.InternalMessage_Status(v)
+		return &val
+	}
 	return nil
 }

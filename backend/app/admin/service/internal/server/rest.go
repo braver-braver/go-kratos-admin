@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/middleware"
@@ -155,6 +156,20 @@ func NewRESTServer(
 	ctx := context.Background()
 	if err := authorizer.ResetPolicies(ctx); err != nil {
 		log.Errorf("Failed to reload policies after service initialization: %v", err)
+		// retry a few times in the background to tolerate transient DB readiness issues
+		go func() {
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for i := 0; i < 5; i++ {
+				<-ticker.C
+				if retryErr := authorizer.ResetPolicies(context.Background()); retryErr != nil {
+					log.Errorf("Retry reloading policies failed (attempt %d): %v", i+1, retryErr)
+					continue
+				}
+				log.Info("Successfully reloaded policies after retry")
+				return
+			}
+		}()
 	} else {
 		log.Info("Successfully reloaded policies after service initialization")
 	}

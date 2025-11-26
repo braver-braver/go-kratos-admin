@@ -1,0 +1,4 @@
+driver = "postgres"
+dsn = "host=timescaledb.pg15-timescale.orb.local port=5432 user=postgres password=*Abcd123456 dbname=kratos_admin sslmode=disable"
+out = "../../app/admin/service/internal/data/gorm"
+with_json_tag = true

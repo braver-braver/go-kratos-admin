@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 
-	"entgo.io/ent/dialect/sql"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/tx7do/go-utils/trans"
 	pagination "github.com/tx7do/kratos-bootstrap/api/gen/go/pagination/v1"
@@ -31,9 +30,6 @@ type UserService struct {
 	departmentRepo     *data.DepartmentRepo
 	organizationRepo   *data.OrganizationRepo
 	tenantRepo         *data.TenantRepo
-
-	userRoleRepo     *data.UserRoleRepo
-	userPositionRepo *data.UserPositionRepo
 }
 
 func NewUserService(
@@ -45,8 +41,6 @@ func NewUserService(
 	departmentRepo *data.DepartmentRepo,
 	organizationRepo *data.OrganizationRepo,
 	tenantRepo *data.TenantRepo,
-	userRoleRepo *data.UserRoleRepo,
-	userPositionRepo *data.UserPositionRepo,
 ) *UserService {
 	l := log.NewHelper(log.With(logger, "module", "user/service/admin-service"))
 	svc := &UserService{
@@ -58,8 +52,6 @@ func NewUserService(
 		departmentRepo:     departmentRepo,
 		organizationRepo:   organizationRepo,
 		tenantRepo:         tenantRepo,
-		userRoleRepo:       userRoleRepo,
-		userPositionRepo:   userPositionRepo,
 	}
 
 	svc.init()
@@ -69,7 +61,7 @@ func NewUserService(
 
 func (s *UserService) init() {
 	ctx := context.Background()
-	if count, _ := s.userRepo.Count(ctx, []func(s *sql.Selector){}); count == 0 {
+	if count, _ := s.userRepo.Count(ctx); count == 0 {
 		_ = s.CreateDefaultUser(ctx)
 	}
 }
@@ -207,7 +199,7 @@ func (s *UserService) fillUserInfo(ctx context.Context, user *userV1.User) error
 	}
 
 	if user.DepartmentId != nil {
-		department, err := s.departmentRepo.Get(ctx, &userV1.GetDepartmentRequest{Id: user.GetDepartmentId()})
+		department, err := s.departmentRepo.Get(ctx, user.GetDepartmentId())
 		if err == nil && department != nil {
 			user.DepartmentName = department.Name
 		} else {

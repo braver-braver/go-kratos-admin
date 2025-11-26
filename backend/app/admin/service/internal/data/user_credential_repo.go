@@ -2,90 +2,53 @@ package data
 
 import (
 	"context"
-	"encoding/base64"
+	"errors"
+	"strings"
 	"time"
 
-	"entgo.io/ent/dialect/sql"
-	"github.com/go-kratos/kratos/v2/log"
+	authenticationV1 "kratos-admin/api/gen/go/authentication/service/v1"
+	"kratos-admin/app/admin/service/internal/data/gorm/model"
+	"kratos-admin/app/admin/service/internal/data/gorm/query"
+	"kratos-admin/pkg/datautil"
 
-	"github.com/tx7do/go-utils/copierutil"
-	"github.com/tx7do/go-utils/crypto"
-	entgo "github.com/tx7do/go-utils/entgo/query"
-	entgoUpdate "github.com/tx7do/go-utils/entgo/update"
-	"github.com/tx7do/go-utils/fieldmaskutil"
-	"github.com/tx7do/go-utils/mapper"
+	"github.com/go-kratos/kratos/v2/log"
 	"github.com/tx7do/go-utils/password"
 	"github.com/tx7do/go-utils/timeutil"
-	"github.com/tx7do/go-utils/trans"
 	pagination "github.com/tx7do/kratos-bootstrap/api/gen/go/pagination/v1"
-
-	"kratos-admin/app/admin/service/internal/data/ent"
-	"kratos-admin/app/admin/service/internal/data/ent/usercredential"
-
-	authenticationV1 "kratos-admin/api/gen/go/authentication/service/v1"
 )
 
 type UserCredentialRepo struct {
-	data *Data
-	log  *log.Helper
-
-	mapper                  *mapper.CopierMapper[authenticationV1.UserCredential, ent.UserCredential]
-	statusConverter         *mapper.EnumTypeConverter[authenticationV1.UserCredential_Status, usercredential.Status]
-	identityTypeConverter   *mapper.EnumTypeConverter[authenticationV1.IdentityType, usercredential.IdentityType]
-	credentialTypeConverter *mapper.EnumTypeConverter[authenticationV1.UserCredential_Type, usercredential.CredentialType]
-
-	passwordCrypto password.Crypto
+	log    *log.Helper
+	q      *query.Query
+	crypto password.Crypto
 }
 
 func NewUserCredentialRepo(logger log.Logger, data *Data, passwordCrypto password.Crypto) *UserCredentialRepo {
-	repo := &UserCredentialRepo{
-		log:                     log.NewHelper(log.With(logger, "module", "user-credentials/repo/admin-service")),
-		data:                    data,
-		passwordCrypto:          passwordCrypto,
-		mapper:                  mapper.NewCopierMapper[authenticationV1.UserCredential, ent.UserCredential](),
-		statusConverter:         mapper.NewEnumTypeConverter[authenticationV1.UserCredential_Status, usercredential.Status](authenticationV1.UserCredential_Status_name, authenticationV1.UserCredential_Status_value),
-		identityTypeConverter:   mapper.NewEnumTypeConverter[authenticationV1.IdentityType, usercredential.IdentityType](authenticationV1.IdentityType_name, authenticationV1.IdentityType_value),
-		credentialTypeConverter: mapper.NewEnumTypeConverter[authenticationV1.UserCredential_Type, usercredential.CredentialType](authenticationV1.UserCredential_Type_name, authenticationV1.UserCredential_Type_value),
+	return &UserCredentialRepo{
+		log:    log.NewHelper(log.With(logger, "module", "user-credential/repo/admin-service")),
+		q:      query.Use(data.db),
+		crypto: passwordCrypto,
 	}
-
-	repo.init()
-
-	return repo
-}
-
-func (r *UserCredentialRepo) init() {
-	r.mapper.AppendConverters(copierutil.NewTimeStringConverterPair())
-	r.mapper.AppendConverters(copierutil.NewTimeTimestamppbConverterPair())
-
-	r.mapper.AppendConverters(r.statusConverter.NewConverterPair())
-	r.mapper.AppendConverters(r.identityTypeConverter.NewConverterPair())
-	r.mapper.AppendConverters(r.credentialTypeConverter.NewConverterPair())
 }
 
 func (r *UserCredentialRepo) IsExist(ctx context.Context, id uint32) (bool, error) {
-	exist, err := r.data.db.Client().UserCredential.Query().
-		Where(usercredential.IDEQ(id)).
-		Exist(ctx)
+	count, err := r.q.UserCredential.WithContext(ctx).
+		Where(r.q.UserCredential.ID.Eq(int32(id))).
+		Count()
 	if err != nil {
 		r.log.Errorf("query exist failed: %s", err.Error())
 		return false, authenticationV1.ErrorInternalServerError("query exist failed")
 	}
-	return exist, nil
+	return count > 0, nil
 }
 
-func (r *UserCredentialRepo) Count(ctx context.Context, whereCond []func(s *sql.Selector)) (int, error) {
-	builder := r.data.db.Client().UserCredential.Query()
-	if len(whereCond) != 0 {
-		builder.Modify(whereCond...)
-	}
-
-	count, err := builder.Count(ctx)
+func (r *UserCredentialRepo) Count(ctx context.Context, _ []func(any)) (int, error) {
+	count, err := r.q.UserCredential.WithContext(ctx).Count()
 	if err != nil {
 		r.log.Errorf("query count failed: %s", err.Error())
 		return 0, authenticationV1.ErrorInternalServerError("query count failed")
 	}
-
-	return count, nil
+	return int(count), nil
 }
 
 func (r *UserCredentialRepo) List(ctx context.Context, req *pagination.PagingRequest) (*authenticationV1.ListUserCredentialResponse, error) {
@@ -93,304 +56,160 @@ func (r *UserCredentialRepo) List(ctx context.Context, req *pagination.PagingReq
 		return nil, authenticationV1.ErrorBadRequest("invalid parameter")
 	}
 
-	builder := r.data.db.Client().UserCredential.Query()
+	builder := r.q.UserCredential.WithContext(ctx)
+	builder = builder.Order(r.q.UserCredential.CreatedAt.Desc())
 
-	err, whereSelectors, querySelectors := entgo.BuildQuerySelector(
-		req.GetQuery(), req.GetOrQuery(),
-		req.GetPage(), req.GetPageSize(), req.GetNoPaging(),
-		req.GetOrderBy(), usercredential.FieldCreatedAt,
-		req.GetFieldMask().GetPaths(),
-	)
-	if err != nil {
-		r.log.Errorf("parse list param error [%s]", err.Error())
-		return nil, authenticationV1.ErrorBadRequest("invalid query parameter")
+	if !req.GetNoPaging() {
+		ps := int(req.GetPageSize())
+		if ps <= 0 {
+			ps = 10
+		}
+		offset := int(req.GetPage()-1) * ps
+		if offset < 0 {
+			offset = 0
+		}
+		builder = builder.Offset(offset).Limit(ps)
 	}
 
-	if querySelectors != nil {
-		builder.Modify(querySelectors...)
-	}
-
-	entities, err := builder.All(ctx)
+	entities, err := builder.Find()
 	if err != nil {
 		r.log.Errorf("query list failed: %s", err.Error())
 		return nil, authenticationV1.ErrorInternalServerError("query list failed")
 	}
 
-	dtos := make([]*authenticationV1.UserCredential, 0, len(entities))
-	for _, entity := range entities {
-		dto := r.mapper.ToDTO(entity)
-		dtos = append(dtos, dto)
+	total, err := r.q.UserCredential.WithContext(ctx).Count()
+	if err != nil {
+		r.log.Errorf("query count failed: %s", err.Error())
+		return nil, authenticationV1.ErrorInternalServerError("query count failed")
 	}
 
-	count, err := r.Count(ctx, whereSelectors)
-	if err != nil {
-		return nil, err
+	items := make([]*authenticationV1.UserCredential, 0, len(entities))
+	for _, e := range entities {
+		items = append(items, r.toDTO(e))
 	}
 
 	return &authenticationV1.ListUserCredentialResponse{
-		Total: uint32(count),
-		Items: dtos,
+		Total: uint32(total),
+		Items: items,
 	}, nil
 }
 
 func (r *UserCredentialRepo) Create(ctx context.Context, req *authenticationV1.CreateUserCredentialRequest) error {
 	if req == nil || req.Data == nil {
-		return authenticationV1.ErrorBadRequest("invalid request")
+		return authenticationV1.ErrorBadRequest("invalid parameter")
 	}
 
-	var err error
-
-	if req.Data.Credential != nil {
-		var newCredential string
-		newCredential, err = r.prepareCredential(r.credentialTypeConverter.ToEntity(req.Data.CredentialType), req.Data.GetCredential())
-		if err != nil {
-			r.log.Errorf("prepare new credential failed: %s", err.Error())
-			return authenticationV1.ErrorBadRequest("prepare new credential failed")
-		}
-		req.Data.Credential = trans.Ptr(newCredential)
+	entity, err := r.fromCreate(req.Data)
+	if err != nil {
+		return err
 	}
 
-	builder := r.data.db.Client().UserCredential.Create()
-	builder.
-		SetUserID(req.Data.GetUserId()).
-		SetNillableIdentityType(r.identityTypeConverter.ToEntity(req.Data.IdentityType)).
-		SetNillableIdentifier(req.Data.Identifier).
-		SetNillableCredentialType(r.credentialTypeConverter.ToEntity(req.Data.CredentialType)).
-		SetNillableCredential(req.Data.Credential).
-		SetNillableIsPrimary(req.Data.IsPrimary).
-		SetNillableStatus(r.statusConverter.ToEntity(req.Data.Status)).
-		SetNillableExtraInfo(req.Data.ExtraInfo).
-		SetNillableCreatedAt(timeutil.TimestamppbToTime(req.Data.CreatedAt))
-
-	if req.Data.TenantId == nil {
-		builder.SetTenantID(req.Data.GetTenantId())
-	}
-	if req.Data.CreatedAt == nil {
-		builder.SetCreatedAt(time.Now())
-	}
-
-	if err = builder.Exec(ctx); err != nil {
-		r.log.Errorf("insert one data failed: %s [%v]", err.Error(), req.Data)
-		return authenticationV1.ErrorInternalServerError("insert data failed")
-	}
-
-	return nil
+	return r.q.UserCredential.WithContext(ctx).Create(entity)
 }
 
 func (r *UserCredentialRepo) Update(ctx context.Context, req *authenticationV1.UpdateUserCredentialRequest) error {
 	if req == nil || req.Data == nil {
-		return authenticationV1.ErrorBadRequest("invalid request")
+		return authenticationV1.ErrorBadRequest("invalid parameter")
 	}
 
-	// 如果不存在则创建
-	if req.GetAllowMissing() {
-		exist, err := r.IsExist(ctx, req.GetData().GetId())
-		if err != nil {
-			return err
-		}
-		if !exist {
-			err = r.Create(ctx, &authenticationV1.CreateUserCredentialRequest{Data: req.Data})
-			return err
-		}
-	}
-
-	var err error
-
-	if req.Data.Credential != nil {
-		var newCredential string
-		newCredential, err = r.prepareCredential(r.credentialTypeConverter.ToEntity(req.Data.CredentialType), req.Data.GetCredential())
-		if err != nil {
-			r.log.Errorf("prepare new credential failed: %s", err.Error())
-			return authenticationV1.ErrorBadRequest("prepare new credential failed")
-		}
-		req.Data.Credential = trans.Ptr(newCredential)
-	}
-
-	if req.UpdateMask != nil {
-		req.UpdateMask.Normalize()
-		if !req.UpdateMask.IsValid(req.Data) {
-			r.log.Errorf("invalid field mask [%v]", req.UpdateMask)
-			return authenticationV1.ErrorBadRequest("invalid field mask")
-		}
-		fieldmaskutil.Filter(req.GetData(), req.UpdateMask.GetPaths())
-	}
-
-	builder := r.data.db.Client().UserCredential.UpdateOneID(req.Data.Id).
-		SetNillableIdentityType(r.identityTypeConverter.ToEntity(req.Data.IdentityType)).
-		SetNillableIdentifier(req.Data.Identifier).
-		SetNillableCredentialType(r.credentialTypeConverter.ToEntity(req.Data.CredentialType)).
-		SetNillableCredential(req.Data.Credential).
-		SetNillableIsPrimary(req.Data.IsPrimary).
-		SetNillableStatus(r.statusConverter.ToEntity(req.Data.Status)).
-		SetNillableExtraInfo(req.Data.ExtraInfo).
-		SetNillableUpdatedAt(timeutil.TimestamppbToTime(req.Data.UpdatedAt))
-
-	if req.Data.UpdatedAt == nil {
-		builder.SetUpdatedAt(time.Now())
-	}
-
-	if req.UpdateMask != nil {
-		nilPaths := fieldmaskutil.NilValuePaths(req.Data, req.GetUpdateMask().GetPaths())
-		nilUpdater := entgoUpdate.BuildSetNullUpdater(nilPaths)
-		if nilUpdater != nil {
-			builder.Modify(nilUpdater)
-		}
-	}
-
-	if err = builder.Exec(ctx); err != nil {
-		r.log.Errorf("update one data failed: %s", err.Error())
+	update := r.buildUpdateMap(req.Data)
+	_, err := r.q.UserCredential.WithContext(ctx).
+		Where(r.q.UserCredential.ID.Eq(int32(req.Data.GetId()))).
+		Updates(update)
+	if err != nil {
+		r.log.Errorf("update data failed: %s", err.Error())
 		return authenticationV1.ErrorInternalServerError("update data failed")
 	}
-
 	return nil
 }
 
 func (r *UserCredentialRepo) Delete(ctx context.Context, id uint32) error {
-	builder := r.data.db.Client().UserCredential.Delete()
-	builder.Where(usercredential.IDEQ(id))
-	if affected, err := builder.Exec(ctx); err != nil {
-		if ent.IsNotFound(err) {
-			return authenticationV1.ErrorNotFound("user credential not found")
-		}
-
-		r.log.Errorf("delete one data failed: %s", err.Error())
-
-		return authenticationV1.ErrorInternalServerError("delete one data failed")
-	} else {
-		if affected == 0 {
-			return authenticationV1.ErrorNotFound("user credential not found")
-		} else {
-			return nil
-		}
+	_, err := r.q.UserCredential.WithContext(ctx).
+		Where(r.q.UserCredential.ID.Eq(int32(id))).
+		Delete()
+	if err != nil {
+		r.log.Errorf("delete data failed: %s", err.Error())
+		return authenticationV1.ErrorInternalServerError("delete data failed")
 	}
+	return nil
 }
 
 func (r *UserCredentialRepo) DeleteByUserId(ctx context.Context, userId uint32) error {
-	builder := r.data.db.Client().UserCredential.Delete()
-	builder.Where(usercredential.UserIDEQ(userId))
-	if affected, err := builder.Exec(ctx); err != nil {
-		if ent.IsNotFound(err) {
-			return authenticationV1.ErrorNotFound("user credential not found")
-		}
-
-		r.log.Errorf("delete one data failed: %s", err.Error())
-
-		return authenticationV1.ErrorInternalServerError("delete one data failed")
-	} else {
-		if affected == 0 {
-			return authenticationV1.ErrorNotFound("user credential not found")
-		} else {
-			return nil
-		}
+	_, err := r.q.UserCredential.WithContext(ctx).
+		Where(r.q.UserCredential.UserID.Eq(int64(userId))).
+		Delete()
+	if err != nil {
+		r.log.Errorf("delete by user id failed: %s", err.Error())
+		return authenticationV1.ErrorInternalServerError("delete data failed")
 	}
+	return nil
 }
 
 func (r *UserCredentialRepo) DeleteByIdentifier(ctx context.Context, identityType authenticationV1.IdentityType, identifier string) error {
-	builder := r.data.db.Client().UserCredential.Delete()
-	builder.Where(
-		usercredential.IdentityTypeEQ(*r.identityTypeConverter.ToEntity(&identityType)),
-		usercredential.IdentifierEQ(identifier),
-	)
-	if affected, err := builder.Exec(ctx); err != nil {
-		if ent.IsNotFound(err) {
-			return authenticationV1.ErrorNotFound("user credential not found")
-		}
-
-		r.log.Errorf("delete one data failed: %s", err.Error())
-
-		return authenticationV1.ErrorInternalServerError("delete one data failed")
-	} else {
-		if affected == 0 {
-			return authenticationV1.ErrorNotFound("user credential not found")
-		} else {
-			return nil
-		}
+	_, err := r.q.UserCredential.WithContext(ctx).
+		Where(
+			r.q.UserCredential.IdentityType.Eq(identityType.String()),
+			r.q.UserCredential.Identifier.Eq(identifier),
+		).
+		Delete()
+	if err != nil {
+		r.log.Errorf("delete by identifier failed: %s", err.Error())
+		return authenticationV1.ErrorInternalServerError("delete data failed")
 	}
+	return nil
 }
 
 func (r *UserCredentialRepo) Get(ctx context.Context, req *authenticationV1.GetUserCredentialRequest) (*authenticationV1.UserCredential, error) {
-	builder := r.data.db.Client().UserCredential.Query()
-
-	builder.Where(
-		usercredential.IDEQ(req.GetId()),
-	)
-
-	entity, err := builder.Only(ctx)
-	if err != nil {
-		if ent.IsNotFound(err) {
-			return nil, authenticationV1.ErrorNotFound("user credential not found")
-		}
-
-		r.log.Errorf("query one data failed: %s", err.Error())
-
-		return nil, authenticationV1.ErrorInternalServerError("query data failed")
+	if req == nil {
+		return nil, authenticationV1.ErrorBadRequest("invalid parameter")
 	}
-
-	return r.mapper.ToDTO(entity), nil
+	entity, err := r.q.UserCredential.WithContext(ctx).
+		Where(r.q.UserCredential.ID.Eq(int32(req.GetId()))).
+		First()
+	if err != nil {
+		r.log.Errorf("query one data failed: %s", err.Error())
+		return nil, authenticationV1.ErrorNotFound("user credential not found")
+	}
+	return r.toDTO(entity), nil
 }
 
 func (r *UserCredentialRepo) GetByIdentifier(ctx context.Context, req *authenticationV1.GetUserCredentialByIdentifierRequest) (*authenticationV1.UserCredential, error) {
-	builder := r.data.db.Client().UserCredential.Query()
-
-	builder.Where(
-		usercredential.IdentityTypeEQ(*r.identityTypeConverter.ToEntity(trans.Ptr(req.GetIdentityType()))),
-		usercredential.IdentifierEQ(req.GetIdentifier()),
-	)
-
-	entity, err := builder.Only(ctx)
-	if err != nil {
-		if ent.IsNotFound(err) {
-			return nil, authenticationV1.ErrorNotFound("user credential not found")
-		}
-
-		r.log.Errorf("query one data failed: %s", err.Error())
-
-		return nil, authenticationV1.ErrorInternalServerError("query data failed")
+	if req == nil {
+		return nil, authenticationV1.ErrorBadRequest("invalid parameter")
 	}
-
-	return r.mapper.ToDTO(entity), nil
+	entity, err := r.q.UserCredential.WithContext(ctx).
+		Where(
+			r.q.UserCredential.IdentityType.Eq(req.GetIdentityType().String()),
+			r.q.UserCredential.Identifier.Eq(req.GetIdentifier()),
+		).
+		First()
+	if err != nil {
+		return nil, authenticationV1.ErrorNotFound("user credential not found")
+	}
+	return r.toDTO(entity), nil
 }
 
 func (r *UserCredentialRepo) VerifyCredential(ctx context.Context, req *authenticationV1.VerifyCredentialRequest) (*authenticationV1.VerifyCredentialResponse, error) {
-	if req.GetNeedDecrypt() {
-		// 解密密码
-		bytesPass, err := base64.StdEncoding.DecodeString(req.GetCredential())
-		if err != nil {
-			r.log.Errorf("decode base64 credential failed: %s", err.Error())
-			return nil, authenticationV1.ErrorBadRequest("invalid credential format")
-		}
-		plainPassword, err := crypto.AesDecrypt(bytesPass, crypto.DefaultAESKey, nil)
-		if err != nil {
-			r.log.Errorf("decrypt credential failed: %s", err.Error())
-			return nil, authenticationV1.ErrorBadRequest("decrypt credential failed")
-		}
-
-		req.Credential = string(plainPassword)
+	if req == nil {
+		return nil, authenticationV1.ErrorBadRequest("invalid parameter")
 	}
 
-	entity, err := r.data.db.Client().UserCredential.Query().
-		Select(usercredential.FieldCredentialType, usercredential.FieldCredential, usercredential.FieldStatus).
+	entity, err := r.q.UserCredential.WithContext(ctx).
 		Where(
-			usercredential.IdentityTypeEQ(*r.identityTypeConverter.ToEntity(trans.Ptr(req.GetIdentityType()))),
-			usercredential.IdentifierEQ(req.GetIdentifier()),
+			r.q.UserCredential.IdentityType.Eq(req.GetIdentityType().String()),
+			r.q.UserCredential.Identifier.Eq(req.GetIdentifier()),
 		).
-		Only(ctx)
+		First()
 	if err != nil {
-		if ent.IsNotFound(err) {
-			return nil, authenticationV1.ErrorUserNotFound("user not found")
-		}
-
-		r.log.Errorf("query one data failed: %s", err.Error())
-
-		return nil, authenticationV1.ErrorServiceUnavailable("db error")
+		return nil, authenticationV1.ErrorUnauthorized("invalid credential")
 	}
 
-	if *entity.Status != usercredential.StatusEnabled {
-		return nil, authenticationV1.ErrorUserFreeze("account has freeze")
+	credVal := ""
+	if entity.Credential != nil {
+		credVal = *entity.Credential
 	}
-
-	if !r.verifyCredential(entity.CredentialType, req.GetCredential(), *entity.Credential) {
-		return nil, authenticationV1.ErrorIncorrectPassword("incorrect password")
+	if !r.verifyCredential(entity.CredentialType, req.GetCredential(), credVal) {
+		return nil, authenticationV1.ErrorUnauthorized("invalid credential")
 	}
 
 	return &authenticationV1.VerifyCredentialResponse{
@@ -398,159 +217,224 @@ func (r *UserCredentialRepo) VerifyCredential(ctx context.Context, req *authenti
 	}, nil
 }
 
-func (r *UserCredentialRepo) verifyCredential(credentialType *usercredential.CredentialType, plainCredential, targetCredential string) bool {
-	if credentialType == nil || plainCredential == "" {
+func (r *UserCredentialRepo) ChangeCredential(ctx context.Context, req *authenticationV1.ChangeCredentialRequest) error {
+	if req == nil {
+		return authenticationV1.ErrorBadRequest("invalid parameter")
+	}
+
+	entity, err := r.q.UserCredential.WithContext(ctx).
+		Where(
+			r.q.UserCredential.IdentityType.Eq(req.GetIdentityType().String()),
+			r.q.UserCredential.Identifier.Eq(req.GetIdentifier()),
+		).
+		First()
+	if err != nil {
+		return authenticationV1.ErrorNotFound("user credential not found")
+	}
+
+	old := ""
+	if entity.Credential != nil {
+		old = *entity.Credential
+	}
+	if !r.verifyCredential(entity.CredentialType, req.GetOldCredential(), old) {
+		return authenticationV1.ErrorUnauthorized("invalid credential")
+	}
+
+	cred, err := r.prepareCredential(entity.CredentialType, req.GetNewCredential())
+	if err != nil {
+		return authenticationV1.ErrorInternalServerError("prepare credential failed")
+	}
+
+	_, err = r.q.UserCredential.WithContext(ctx).
+		Where(r.q.UserCredential.ID.Eq(entity.ID)).
+		Update(r.q.UserCredential.Credential, cred)
+	return err
+}
+
+func (r *UserCredentialRepo) ResetCredential(ctx context.Context, req *authenticationV1.ResetCredentialRequest) error {
+	if req == nil {
+		return authenticationV1.ErrorBadRequest("invalid parameter")
+	}
+
+	builder := r.q.UserCredential.WithContext(ctx).
+		Where(
+			r.q.UserCredential.IdentityType.Eq(req.GetIdentityType().String()),
+			r.q.UserCredential.Identifier.Eq(req.GetIdentifier()),
+		)
+
+	entity, err := builder.First()
+	if err != nil {
+		return authenticationV1.ErrorNotFound("user credential not found")
+	}
+
+	cred, err := r.prepareCredential(entity.CredentialType, req.GetNewCredential())
+	if err != nil {
+		return authenticationV1.ErrorInternalServerError("prepare credential failed")
+	}
+
+	_, err = builder.Update(r.q.UserCredential.Credential, cred)
+	return err
+}
+
+func (r *UserCredentialRepo) fromCreate(data *authenticationV1.UserCredential) (*model.UserCredential, error) {
+	credType := credentialTypeToString(data.CredentialType)
+	cred, err := r.prepareCredential(credType, data.GetCredential())
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	return &model.UserCredential{
+		CreatedAt:      &now,
+		UpdatedAt:      &now,
+		TenantID:       cloneInt64FromUint32(data.TenantId),
+		UserID:         cloneInt64FromUint32(data.UserId),
+		IdentityType:   identityTypeToString(data.IdentityType),
+		Identifier:     cloneStringPtr(data.Identifier),
+		CredentialType: credType,
+		Credential:     cloneStringPtr(&cred),
+		IsPrimary:      cloneBoolPtr(data.IsPrimary),
+		Status:         credentialStatusToString(data.Status),
+		ExtraInfo:      cloneStringPtr(data.ExtraInfo),
+	}, nil
+}
+
+func (r *UserCredentialRepo) buildUpdateMap(data *authenticationV1.UserCredential) map[string]any {
+	update := map[string]any{}
+	if data.TenantId != nil {
+		update["tenant_id"] = data.GetTenantId()
+	}
+	if data.UserId != nil {
+		update["user_id"] = data.GetUserId()
+	}
+	if data.IdentityType != nil {
+		update["identity_type"] = data.GetIdentityType().String()
+	}
+	if data.Identifier != nil {
+		update["identifier"] = data.GetIdentifier()
+	}
+	if data.CredentialType != nil {
+		update["credential_type"] = data.GetCredentialType().String()
+	}
+	if data.Credential != nil {
+		credType := credentialTypeToString(data.CredentialType)
+		if cred, err := r.prepareCredential(credType, data.GetCredential()); err == nil {
+			update["credential"] = cred
+		}
+	}
+	if data.IsPrimary != nil {
+		update["is_primary"] = data.GetIsPrimary()
+	}
+	if data.Status != nil {
+		update["status"] = data.GetStatus().String()
+	}
+	if data.ExtraInfo != nil {
+		update["extra_info"] = data.GetExtraInfo()
+	}
+	update["updated_at"] = time.Now()
+	return update
+}
+
+func (r *UserCredentialRepo) toDTO(entity *model.UserCredential) *authenticationV1.UserCredential {
+	if entity == nil {
+		return nil
+	}
+
+	return &authenticationV1.UserCredential{
+		Id:             uint32(entity.ID),
+		TenantId:       datautil.CloneUint32(toUint32(entity.TenantID)),
+		UserId:         datautil.CloneUint32(toUint32(entity.UserID)),
+		IdentityType:   stringToIdentityType(entity.IdentityType),
+		Identifier:     cloneStringPtr(entity.Identifier),
+		CredentialType: stringToCredentialType(entity.CredentialType),
+		Credential:     entity.Credential,
+		IsPrimary:      cloneBoolPtr(entity.IsPrimary),
+		Status:         stringToCredentialStatus(entity.Status),
+		ExtraInfo:      cloneStringPtr(entity.ExtraInfo),
+		CreatedAt:      timeutil.TimeToTimestamppb(entity.CreatedAt),
+		UpdatedAt:      timeutil.TimeToTimestamppb(entity.UpdatedAt),
+		DeletedAt:      timeutil.TimeToTimestamppb(entity.DeletedAt),
+	}
+}
+
+func (r *UserCredentialRepo) verifyCredential(credentialType *string, plainCredential, targetCredential string) bool {
+	if credentialType == nil {
 		return false
 	}
-
-	switch *credentialType {
-	case usercredential.CredentialTypePasswordHash:
-		ok, err := r.passwordCrypto.Verify(plainCredential, targetCredential)
-		if err != nil {
-			r.log.Errorf("verify password failed: %s", err.Error())
-			return false
-		}
+	switch strings.ToUpper(*credentialType) {
+	case authenticationV1.UserCredential_PASSWORD_HASH.String():
+		ok, _ := r.crypto.Verify(targetCredential, plainCredential)
 		return ok
 	default:
-		return plainCredential == targetCredential
+		return false
 	}
 }
 
-func (r *UserCredentialRepo) prepareCredential(credentialType *usercredential.CredentialType, plainCredential string) (string, error) {
-	var newCredential string
-	switch *credentialType {
-	case usercredential.CredentialTypePasswordHash:
-		var err error
-		// 加密明文密码
-		newCredential, err = r.passwordCrypto.Encrypt(plainCredential)
-		if err != nil {
-			r.log.Errorf("hash new password failed: %s", err.Error())
-			return "", authenticationV1.ErrorBadRequest("hash new password failed")
-		}
-
+func (r *UserCredentialRepo) prepareCredential(credentialType *string, plainCredential string) (string, error) {
+	if credentialType == nil {
+		return "", errors.New("missing credential type")
+	}
+	switch strings.ToUpper(*credentialType) {
+	case authenticationV1.UserCredential_PASSWORD_HASH.String():
+		return r.crypto.Encrypt(plainCredential)
 	default:
-		newCredential = plainCredential
+		return "", errors.New("unsupported credential type")
 	}
-
-	return newCredential, nil
 }
 
-// ChangeCredential 修改认证信息
-func (r *UserCredentialRepo) ChangeCredential(ctx context.Context, req *authenticationV1.ChangeCredentialRequest) error {
-	if req.GetNeedDecrypt() {
-		// 解密密码
-		bytesPass, _ := base64.StdEncoding.DecodeString(req.GetOldCredential())
-		plainPassword, _ := crypto.AesDecrypt(bytesPass, crypto.DefaultAESKey, nil)
-		req.OldCredential = string(plainPassword)
-
-		bytesPass, _ = base64.StdEncoding.DecodeString(req.GetNewCredential())
-		plainPassword, _ = crypto.AesDecrypt(bytesPass, crypto.DefaultAESKey, nil)
-		req.NewCredential = string(plainPassword)
+func stringToIdentityType(s *string) *authenticationV1.IdentityType {
+	if s == nil {
+		return nil
 	}
-
-	entity, err := r.data.db.Client().UserCredential.
-		Query().
-		Select(
-			usercredential.FieldCredentialType,
-			usercredential.FieldCredential,
-		).
-		Where(
-			usercredential.IdentityTypeEQ(*r.identityTypeConverter.ToEntity(trans.Ptr(req.GetIdentityType()))),
-			usercredential.IdentifierEQ(req.GetIdentifier()),
-		).
-		Only(ctx)
-	if err != nil {
-		r.log.Errorf("query one data failed: %s", err.Error())
-		return authenticationV1.ErrorInternalServerError("query one data failed")
+	if v, ok := authenticationV1.IdentityType_value[*s]; ok {
+		val := authenticationV1.IdentityType(v)
+		return &val
 	}
-
-	if entity.CredentialType == nil {
-		return authenticationV1.ErrorNotFound("user credential not found")
-	}
-
-	// 验证旧认证信息
-	if !r.verifyCredential(entity.CredentialType, req.GetOldCredential(), *entity.Credential) {
-		return authenticationV1.ErrorBadRequest("invalid old password")
-	}
-
-	var newCredential string
-	newCredential, err = r.prepareCredential(entity.CredentialType, req.GetOldCredential())
-	if err != nil {
-		r.log.Errorf("prepare new credential failed: %s", err.Error())
-		return authenticationV1.ErrorBadRequest("prepare new credential failed")
-	}
-
-	if newCredential == "" {
-		return authenticationV1.ErrorBadRequest("new credential cannot be empty")
-	}
-
-	builder := r.data.db.Client().UserCredential.Update()
-	builder.Where(
-		usercredential.IdentityTypeEQ(*r.identityTypeConverter.ToEntity(trans.Ptr(req.GetIdentityType()))),
-		usercredential.IdentifierEQ(req.GetIdentifier()),
-	)
-	builder.
-		SetCredential(newCredential).
-		SetUpdatedAt(time.Now())
-	if err = builder.Exec(ctx); err != nil {
-		r.log.Errorf("update one data failed: %s", err.Error())
-		return authenticationV1.ErrorInternalServerError("update data failed")
-	}
-
 	return nil
 }
 
-// ResetCredential 修改认证信息
-func (r *UserCredentialRepo) ResetCredential(ctx context.Context, req *authenticationV1.ResetCredentialRequest) error {
-	if req.GetNeedDecrypt() {
-		// 解密密码
-		bytesPass, _ := base64.StdEncoding.DecodeString(req.GetNewCredential())
-		plainPassword, _ := crypto.AesDecrypt(bytesPass, crypto.DefaultAESKey, nil)
-		req.NewCredential = string(plainPassword)
+func stringToCredentialType(s *string) *authenticationV1.UserCredential_Type {
+	if s == nil {
+		return nil
 	}
-
-	entity, err := r.data.db.Client().UserCredential.
-		Query().
-		Select(
-			usercredential.FieldCredentialType,
-		).
-		Where(
-			usercredential.IdentityTypeEQ(*r.identityTypeConverter.ToEntity(trans.Ptr(req.GetIdentityType()))),
-			usercredential.IdentifierEQ(req.GetIdentifier()),
-		).
-		Only(ctx)
-	if err != nil {
-		r.log.Errorf("query one data failed: %s", err.Error())
-		return authenticationV1.ErrorInternalServerError("query one data failed")
+	if v, ok := authenticationV1.UserCredential_Type_value[*s]; ok {
+		val := authenticationV1.UserCredential_Type(v)
+		return &val
 	}
-
-	if entity.CredentialType == nil {
-		return authenticationV1.ErrorNotFound("user credential not found")
-	}
-
-	var newCredential string
-	newCredential, err = r.prepareCredential(entity.CredentialType, req.GetNewCredential())
-	if err != nil {
-		r.log.Errorf("prepare new credential failed: %s", err.Error())
-		return authenticationV1.ErrorBadRequest("prepare new credential failed")
-	}
-
-	if newCredential == "" {
-		return authenticationV1.ErrorBadRequest("new credential cannot be empty")
-	}
-
-	builder := r.data.db.Client().UserCredential.Update()
-	builder.Where(
-		usercredential.IdentityTypeEQ(*r.identityTypeConverter.ToEntity(trans.Ptr(req.GetIdentityType()))),
-		usercredential.IdentifierEQ(req.GetIdentifier()),
-	)
-	builder.
-		SetCredential(newCredential).
-		SetUpdatedAt(time.Now())
-	if err = builder.Exec(ctx); err != nil {
-		r.log.Errorf("update one data failed: %s", err.Error())
-		return authenticationV1.ErrorInternalServerError("update data failed")
-	}
-
 	return nil
+}
+
+func stringToCredentialStatus(s *string) *authenticationV1.UserCredential_Status {
+	if s == nil {
+		return nil
+	}
+	if v, ok := authenticationV1.UserCredential_Status_value[*s]; ok {
+		val := authenticationV1.UserCredential_Status(v)
+		return &val
+	}
+	return nil
+}
+
+func identityTypeToString(t *authenticationV1.IdentityType) *string {
+	if t == nil {
+		return nil
+	}
+	s := t.String()
+	return &s
+}
+
+func credentialTypeToString(t *authenticationV1.UserCredential_Type) *string {
+	if t == nil {
+		return nil
+	}
+	s := t.String()
+	return &s
+}
+
+func credentialStatusToString(s *authenticationV1.UserCredential_Status) *string {
+	if s == nil {
+		return nil
+	}
+	str := s.String()
+	return &str
 }

@@ -59,7 +59,7 @@ func (s *DictService) CreateDictType(ctx context.Context, req *dictV1.CreateDict
 
 	req.Data.CreatedBy = trans.Ptr(operator.UserId)
 
-	if err = s.dictTypeRepo.Create(ctx, req); err != nil {
+	if _, err = s.dictTypeRepo.Create(ctx, req); err != nil {
 		return nil, err
 	}
 
@@ -111,7 +111,7 @@ func (s *DictService) CreateDictEntry(ctx context.Context, req *dictV1.CreateDic
 
 	req.Data.CreatedBy = trans.Ptr(operator.UserId)
 
-	if err = s.dictEntryRepo.Create(ctx, req); err != nil {
+	if _, err = s.dictEntryRepo.Create(ctx, req); err != nil {
 		return nil, err
 	}
 

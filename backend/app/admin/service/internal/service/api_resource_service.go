@@ -6,7 +6,6 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/transport/http"
 
-	"entgo.io/ent/dialect/sql"
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/tx7do/go-utils/trans"
 	pagination "github.com/tx7do/kratos-bootstrap/api/gen/go/pagination/v1"
@@ -50,7 +49,7 @@ func NewApiResourceService(
 
 func (s *ApiResourceService) init() {
 	ctx := context.Background()
-	if count, _ := s.repo.Count(ctx, []func(s *sql.Selector){}); count == 0 {
+	if count, _ := s.repo.Count(ctx, nil); count == 0 {
 		_, _ = s.SyncApiResources(ctx, &emptypb.Empty{})
 	}
 }
@@ -76,7 +75,7 @@ func (s *ApiResourceService) Create(ctx context.Context, req *adminV1.CreateApiR
 
 	req.Data.CreatedBy = trans.Ptr(operator.UserId)
 
-	if err = s.repo.Create(ctx, req); err != nil {
+	if _, err = s.repo.Create(ctx, req); err != nil {
 		return nil, err
 	}
 
@@ -127,8 +126,6 @@ func (s *ApiResourceService) Delete(ctx context.Context, req *adminV1.DeleteApiR
 }
 
 func (s *ApiResourceService) SyncApiResources(ctx context.Context, _ *emptypb.Empty) (*emptypb.Empty, error) {
-	_ = s.repo.Truncate(ctx)
-
 	//if err := s.syncWithWalkRoute(ctx); err != nil {
 	//	return nil, err
 	//}

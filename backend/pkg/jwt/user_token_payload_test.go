@@ -25,7 +25,7 @@ func TestNewUserTokenPayload(t *testing.T) {
 	assert.Equal(t, user.GetId(), payload.GetUserId())
 	assert.Equal(t, user.GetUsername(), payload.GetUsername())
 	assert.Equal(t, user.GetAuthority(), payload.GetAuthority())
-	assert.Equal(t, clientId, payload.ClientId)
+	assert.Equal(t, clientId, payload.GetClientId())
 }
 
 func TestMakeAuthClaims(t *testing.T) {

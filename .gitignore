@@ -32,3 +32,10 @@ bin/
 .vscode/
 .idea/
 *.swp
+
+# lh
+.lh
+docs/.lh
+.serena
+.codemap
+frontend/.lh

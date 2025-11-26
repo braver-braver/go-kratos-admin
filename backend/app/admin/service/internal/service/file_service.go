@@ -53,7 +53,7 @@ func (s *FileService) Create(ctx context.Context, req *fileV1.CreateFileRequest)
 
 	req.Data.CreatedBy = trans.Ptr(operator.UserId)
 
-	if err = s.fileRepo.Create(ctx, req); err != nil {
+	if _, err = s.fileRepo.Create(ctx, req); err != nil {
 		return nil, err
 	}
 

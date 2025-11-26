@@ -63,7 +63,7 @@ func (s *DepartmentService) List(ctx context.Context, req *pagination.PagingRequ
 }
 
 func (s *DepartmentService) Get(ctx context.Context, req *userV1.GetDepartmentRequest) (*userV1.Department, error) {
-	resp, err := s.departmentRepo.Get(ctx, req)
+	resp, err := s.departmentRepo.Get(ctx, req.GetId())
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +102,7 @@ func (s *DepartmentService) Create(ctx context.Context, req *userV1.CreateDepart
 
 	req.Data.CreatedBy = trans.Ptr(operator.UserId)
 
-	if err = s.departmentRepo.Create(ctx, req); err != nil {
+	if _, err = s.departmentRepo.Create(ctx, req); err != nil {
 		return nil, err
 	}
 
@@ -130,7 +130,7 @@ func (s *DepartmentService) Update(ctx context.Context, req *userV1.UpdateDepart
 }
 
 func (s *DepartmentService) Delete(ctx context.Context, req *userV1.DeleteDepartmentRequest) (*emptypb.Empty, error) {
-	if err := s.departmentRepo.Delete(ctx, req); err != nil {
+	if err := s.departmentRepo.Delete(ctx, req.GetId()); err != nil {
 		return nil, err
 	}
 
