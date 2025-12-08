@@ -40,9 +40,8 @@ node_modules/
 dist/
 build/
 coverage/
-.env*
 
-.lh
-.codex
-.serena
-.specify
+
+.env*
+.codex/
+.specify/
