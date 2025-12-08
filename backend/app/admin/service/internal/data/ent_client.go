@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -20,12 +21,15 @@ import (
 func NewEntClient(cfg *conf.Bootstrap, logger log.Logger) *entgo.EntClient[*ent.Client] {
 	l := log.NewHelper(log.With(logger, "module", "ent/data/admin-service"))
 
-	drv, err := entgo.CreateDriver(
-		cfg.Data.Database.GetDriver(),
-		cfg.Data.Database.GetSource(),
-		cfg.Data.Database.GetEnableTrace(),
-		cfg.Data.Database.GetEnableMetrics(),
-	)
+	driverName := cfg.Data.Database.GetDriver()
+	switch strings.ToLower(driverName) {
+	case "gorm-postgres", "gorm_postgres":
+		driverName = "postgres"
+	case "gorm-mysql", "gorm_mysql":
+		driverName = "mysql"
+	}
+
+	drv, err := entgo.CreateDriver(driverName, cfg.Data.Database.GetSource(), cfg.Data.Database.GetEnableTrace(), cfg.Data.Database.GetEnableMetrics())
 	if err != nil {
 		l.Fatalf("failed opening connection to db: %v", err)
 		return nil

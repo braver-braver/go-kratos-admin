@@ -1,0 +1,9 @@
+oss:
+  minio:
+    endpoint: "minio:9000"
+    upload_host: "minio:9000"
+    download_host: "http://minio:9000"
+    access_key: "minio-access-key"
+    secret_key: "minio-secret-key"
+    token: ""
+    use_ssl: false

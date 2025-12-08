@@ -21,9 +21,10 @@ import (
 // initApp init kratos application.
 func initApp(logger log.Logger, registrar registry.Registrar, bootstrap *v1.Bootstrap) (*kratos.App, func(), error) {
 	authenticator := data.NewAuthenticator(bootstrap)
-	entClient := data.NewEntClient(bootstrap, logger)
+	// entClient := data.NewEntClient(bootstrap, logger)
+	db := data.NewGormDB(bootstrap, logger)
 	client := data.NewRedisClient(bootstrap, logger)
-	dataData, cleanup, err := data.NewData(logger, entClient, client)
+	dataData, cleanup, err := data.NewData(bootstrap, logger, nil, db, client)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -33,8 +34,7 @@ func initApp(logger log.Logger, registrar registry.Registrar, bootstrap *v1.Boot
 	adminOperationLogRepo := data.NewAdminOperationLogRepo(dataData, logger)
 	adminLoginLogRepo := data.NewAdminLoginLogRepo(dataData, logger)
 	userRepo := data.NewUserRepo(logger, dataData)
-	crypto := data.NewPasswordCrypto()
-	userCredentialRepo := data.NewUserCredentialRepo(logger, dataData, crypto)
+	userCredentialRepo := data.NewUserCredentialRepo(dataData, logger)
 	tenantRepo := data.NewTenantRepo(dataData, logger)
 	userTokenCacheRepo := data.NewUserTokenRepo(logger, client, authenticator, bootstrap)
 	authenticationService := service.NewAuthenticationService(logger, userRepo, userCredentialRepo, tenantRepo, roleRepo, userTokenCacheRepo, authenticator)

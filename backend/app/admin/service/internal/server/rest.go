@@ -7,6 +7,7 @@ import (
 	"github.com/go-kratos/kratos/v2/middleware"
 	"github.com/go-kratos/kratos/v2/middleware/logging"
 	"github.com/go-kratos/kratos/v2/middleware/selector"
+	"github.com/go-kratos/kratos/v2/middleware/tracing"
 	"github.com/go-kratos/kratos/v2/transport/http"
 
 	authnEngine "github.com/tx7do/kratos-authn/engine"
@@ -51,24 +52,32 @@ func newRestMiddleware(
 	loginLogRepo *data.AdminLoginLogRepo,
 ) []middleware.Middleware {
 	var ms []middleware.Middleware
-	ms = append(ms, logging.Server(logger))
+	ms = append(ms, tracing.Server(), logging.Server(logger))
 
-	ms = append(ms, applogging.Server(
-		applogging.WithWriteOperationLogFunc(func(ctx context.Context, data *adminV1.AdminOperationLog) error {
-			// TODO 如果系统的负载比较小，可以同步写入数据库，否则，建议使用异步方式，即投递进队列。
-			return operationLogRepo.Create(ctx, &adminV1.CreateAdminOperationLogRequest{Data: data})
-		}),
-		applogging.WithWriteLoginLogFunc(func(ctx context.Context, data *adminV1.AdminLoginLog) error {
-			// TODO 如果系统的负载比较小，可以同步写入数据库，否则，建议使用异步方式，即投递进队列。
-			return loginLogRepo.Create(ctx, &adminV1.CreateAdminLoginLogRequest{Data: data})
-		}),
-	))
+	ms = append(
+		ms, applogging.Server(
+			applogging.WithWriteOperationLogFunc(
+				func(ctx context.Context, data *adminV1.AdminOperationLog) error {
+					// TODO 如果系统的负载比较小，可以同步写入数据库，否则，建议使用异步方式，即投递进队列。
+					return operationLogRepo.Create(ctx, &adminV1.CreateAdminOperationLogRequest{Data: data})
+				},
+			),
+			applogging.WithWriteLoginLogFunc(
+				func(ctx context.Context, data *adminV1.AdminLoginLog) error {
+					// TODO 如果系统的负载比较小，可以同步写入数据库，否则，建议使用异步方式，即投递进队列。
+					return loginLogRepo.Create(ctx, &adminV1.CreateAdminLoginLogRequest{Data: data})
+				},
+			),
+		),
+	)
 
-	ms = append(ms, selector.Server(
-		authn.Server(authenticator),
-		auth.Server(),
-		authz.Server(authorizer.Engine()),
-	).Match(newRestWhiteListMatcher()).Build())
+	ms = append(
+		ms, selector.Server(
+			authn.Server(authenticator),
+			auth.Server(),
+			authz.Server(authorizer.Engine()),
+		).Match(newRestWhiteListMatcher()).Build(),
+	)
 
 	return ms
 }
@@ -106,7 +115,8 @@ func NewRESTServer(
 		return nil
 	}
 
-	srv := rpc.CreateRestServer(cfg,
+	srv := rpc.CreateRestServer(
+		cfg,
 		newRestMiddleware(logger, authenticator, authorizer, operationLogRepo, loginLogRepo)...,
 	)
 

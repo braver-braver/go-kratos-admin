@@ -224,23 +224,19 @@ func (a *Authorizer) generateOpaPolicies(roles *userV1.ListRoleResponse, apis *a
 	}
 
 	policies := make(authzEngine.PolicyMap, len(roles.Items))
-	paths := make([]OpaPolicyPath, 0, len(roles.Items)*len(apis.Items))
-
 	//policies["projects"] = authzEngine.MakeProjects("api")
-
-	apiSet := make(map[uint32]struct{})
 
 	for _, role := range roles.Items {
 		if role.GetId() == 0 {
 			continue // Skip if role or API ID is not set
 		}
 
-		paths = paths[:0] // Reset paths for each role
-
+		apiSet := make(map[uint32]struct{}, len(role.GetApis()))
 		for _, apiId := range role.GetApis() {
 			apiSet[apiId] = struct{}{}
 		}
 
+		paths := make([]OpaPolicyPath, 0, len(apiSet))
 		for _, api := range apis.Items {
 			if api.GetId() == 0 {
 				continue // Skip if role or API ID is not set

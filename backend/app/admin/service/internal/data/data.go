@@ -1,6 +1,9 @@
 package data
 
 import (
+	"os"
+	"strings"
+
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/redis/go-redis/v9"
 
@@ -9,6 +12,7 @@ import (
 
 	"github.com/tx7do/go-utils/entgo"
 	"github.com/tx7do/go-utils/password"
+	"gorm.io/gorm"
 
 	conf "github.com/tx7do/kratos-bootstrap/api/gen/go/conf/v1"
 	redisClient "github.com/tx7do/kratos-bootstrap/cache/redis"
@@ -23,16 +27,24 @@ type Data struct {
 	log *log.Helper
 
 	rdb *redis.Client
-	db  *entgo.EntClient[*ent.Client]
+
+	// ent (baseline) client
+	db *entgo.EntClient[*ent.Client]
+	// gorm client when enabled
+	gormDB *gorm.DB
 
 	authenticator authnEngine.Authenticator
 	authorizer    *Authorizer
+
+	useGorm bool
 }
 
 // NewData .
 func NewData(
+	cfg *conf.Bootstrap,
 	logger log.Logger,
 	db *entgo.EntClient[*ent.Client],
+	gormDB *gorm.DB,
 	rdb *redis.Client,
 ) (*Data, func(), error) {
 	l := log.NewHelper(log.With(logger, "module", "data/admin-service"))
@@ -40,8 +52,11 @@ func NewData(
 	d := &Data{
 		log: l,
 
-		db:  db,
-		rdb: rdb,
+		db:     db,
+		gormDB: gormDB,
+		rdb:    rdb,
+
+		useGorm: shouldUseGorm(cfg),
 	}
 
 	return d, func() {
@@ -53,12 +68,46 @@ func NewData(
 			}
 		}
 
+		if d.gormDB != nil {
+			if sqlDB, err := d.gormDB.DB(); err == nil {
+				_ = sqlDB.Close()
+			}
+		}
+
 		if d.rdb != nil {
 			if err := d.rdb.Close(); err != nil {
 				l.Error(err)
 			}
 		}
 	}, nil
+}
+
+func (d *Data) UseGorm() bool {
+	return d.useGorm && d.gormDB != nil
+}
+
+func (d *Data) EntClient() *entgo.EntClient[*ent.Client] {
+	return d.db
+}
+
+func (d *Data) GormDB() *gorm.DB {
+	return d.gormDB
+}
+
+func shouldUseGorm(cfg *conf.Bootstrap) bool {
+	if cfg == nil {
+		return false
+	}
+	if v := strings.ToLower(os.Getenv("USE_GORM")); v == "true" || v == "1" {
+		return true
+	}
+	if cfg.GetData() != nil && cfg.GetData().GetDatabase() != nil {
+		drv := strings.ToLower(cfg.GetData().GetDatabase().GetDriver())
+		if strings.Contains(drv, "gorm") {
+			return true
+		}
+	}
+	return false
 }
 
 // NewRedisClient 创建Redis客户端

@@ -3,7 +3,9 @@ package oss
 import (
 	"context"
 	"fmt"
+	"net"
 	"testing"
+	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/stretchr/testify/assert"
@@ -29,6 +31,12 @@ func createTestClient() *MinIOClient {
 }
 
 func TestMinIoClient(t *testing.T) {
+	if conn, err := net.DialTimeout("tcp", "127.0.0.1:9000", time.Second); err != nil {
+		t.Skip("minio not reachable, skipping integration test")
+	} else {
+		_ = conn.Close()
+	}
+
 	cli := createTestClient()
 	assert.NotNil(t, cli)
 
@@ -43,6 +51,12 @@ func TestMinIoClient(t *testing.T) {
 }
 
 func TestListFile(t *testing.T) {
+	if conn, err := net.DialTimeout("tcp", "127.0.0.1:9000", time.Second); err != nil {
+		t.Skip("minio not reachable, skipping integration test")
+	} else {
+		_ = conn.Close()
+	}
+
 	cli := createTestClient()
 	assert.NotNil(t, cli)
 

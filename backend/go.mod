@@ -12,6 +12,7 @@ require (
 	github.com/getkin/kin-openapi v0.133.0
 	github.com/go-kratos/kratos/v2 v2.9.1
 	github.com/go-sql-driver/mysql v1.9.3
+	github.com/gogf/gf/v2 v2.9.6
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/gnostic v0.7.1
 	github.com/google/uuid v1.6.0
@@ -53,6 +54,18 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20251103181224-f26f9409b101
 	google.golang.org/grpc v1.76.0
 	google.golang.org/protobuf v1.36.10
+	gorm.io/cli/gorm v0.2.4
+	gorm.io/driver/postgres v1.5.11
+	gorm.io/gen v0.3.16
+	gorm.io/plugin/dbresolver v1.5.0
+)
+
+require (
+	github.com/jinzhu/inflection v1.0.0 // indirect
+	github.com/jinzhu/now v1.1.5 // indirect
+	gorm.io/datatypes v1.2.4 // indirect
+	gorm.io/driver/mysql v1.5.7 // indirect
+	gorm.io/hints v1.1.0 // indirect
 )
 
 require (
@@ -306,5 +319,8 @@ require (
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
+	gorm.io/gorm v1.31.1
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+replace gorm.io/plugin/dbresolver => gorm.io/plugin/dbresolver v1.6.2

@@ -22,7 +22,6 @@ import (
 
 	authenticationV1 "kratos-admin/api/gen/go/authentication/service/v1"
 
-	"kratos-admin/pkg/entgo/viewer"
 	"kratos-admin/pkg/jwt"
 	"kratos-admin/pkg/metadata"
 )
@@ -37,8 +36,8 @@ func Server(opts ...Option) middleware.Middleware {
 		injectOperatorId: false,
 		injectTenantId:   false,
 		enableAuthz:      true,
-		injectEnt:        true,
-		injectMetadata:   true,
+		// injectEnt:        true,
+		injectMetadata: true,
 	}
 	for _, o := range opts {
 		o(&op)
@@ -90,15 +89,16 @@ func Server(opts ...Option) middleware.Middleware {
 				}
 			}
 
-			if op.injectEnt {
-				ctx = viewer.NewContext(ctx, viewer.UserViewer{
-					Authority: tokenPayload.GetAuthority(),
-					TenantId:  tokenPayload.TenantId,
-				})
-			}
+			//if op.injectEnt {
+			//	ctx = viewer.NewContext(ctx, viewer.UserViewer{
+			//		Authority: tokenPayload.GetAuthority(),
+			//		TenantId:  tokenPayload.TenantId,
+			//	})
+			//}
 
 			if op.injectMetadata {
-				ctx = metadata.NewOperatorMetadataContext(ctx,
+				ctx = metadata.NewOperatorMetadataContext(
+					ctx,
 					trans.Ptr(tokenPayload.UserId),
 					tokenPayload.TenantId,
 					trans.Ptr(tokenPayload.GetAuthority()),
@@ -123,11 +123,6 @@ func processAuthz(
 	tr transport.Transporter,
 	tokenPayload *authenticationV1.UserTokenPayload,
 ) (context.Context, error) {
-	//var sub string
-	//if sub, err = tokenPayload.GetSubject(); err != nil {
-	//	return nil, ErrExtractSubjectFailed
-	//}
-
 	path := authzEngine.Resource(tr.Operation())
 	action := defaultAction
 
@@ -138,13 +133,19 @@ func processAuthz(
 		action = authzEngine.Action(htr.Request().Method)
 	}
 
+	subjects := tokenPayload.GetRoles()
+	if len(subjects) == 0 {
+		subjects = []string{strconv.FormatUint(uint64(tokenPayload.GetUserId()), 10)}
+	}
+	sub := authzEngine.Subject(subjects[0])
+
 	//log.Infof("Coming API Request: PATH[%s] ACTION[%s] USER ROLES[%v] USER ID[%d]",
 	//	path, action, tokenPayload.GetRoles(), tokenPayload.UserId,
 	//)
 
 	authzClaims := authzEngine.AuthClaims{
-		//Subject:  (*authzEngine.Subject)(&sub),
-		Subjects: trans.Ptr(tokenPayload.GetRoles()),
+		Subject:  &sub,
+		Subjects: trans.Ptr(subjects),
 		Action:   trans.Ptr(action),
 		Resource: trans.Ptr(path),
 		//Project:  trans.Ptr(authzEngine.Project("api")),
@@ -195,11 +196,15 @@ func setRequestTenantId(req interface{}, payload *authenticationV1.UserTokenPayl
 func ensurePagingRequestTenantId(req interface{}, payload *authenticationV1.UserTokenPayload) error {
 	if paging, ok := req.(*pagination.PagingRequest); ok && payload.GetTenantId() > 0 {
 		if paging.Query != nil {
-			newStr := stringutil.ReplaceJSONField("tenantId|tenant_id", strconv.Itoa(int(payload.GetTenantId())), paging.GetQuery())
+			newStr := stringutil.ReplaceJSONField(
+				"tenantId|tenant_id", strconv.Itoa(int(payload.GetTenantId())), paging.GetQuery(),
+			)
 			paging.Query = trans.Ptr(newStr)
 		}
 		if paging.OrQuery != nil {
-			newStr := stringutil.ReplaceJSONField("tenantId|tenant_id", strconv.Itoa(int(payload.GetTenantId())), paging.GetOrQuery())
+			newStr := stringutil.ReplaceJSONField(
+				"tenantId|tenant_id", strconv.Itoa(int(payload.GetTenantId())), paging.GetOrQuery(),
+			)
 			paging.OrQuery = trans.Ptr(newStr)
 		}
 	}

@@ -32,3 +32,12 @@ bin/
 .vscode/
 .idea/
 *.swp
+.lh
+.serena
+
+# Frontend/Node artifacts
+node_modules/
+dist/
+build/
+coverage/
+.env*

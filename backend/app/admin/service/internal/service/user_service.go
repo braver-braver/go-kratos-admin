@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 
-	"entgo.io/ent/dialect/sql"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/tx7do/go-utils/trans"
 	pagination "github.com/tx7do/kratos-bootstrap/api/gen/go/pagination/v1"
@@ -69,7 +68,7 @@ func NewUserService(
 
 func (s *UserService) init() {
 	ctx := context.Background()
-	if count, _ := s.userRepo.Count(ctx, []func(s *sql.Selector){}); count == 0 {
+	if count, _ := s.userRepo.Count(ctx); count == 0 {
 		_ = s.CreateDefaultUser(ctx)
 	}
 }

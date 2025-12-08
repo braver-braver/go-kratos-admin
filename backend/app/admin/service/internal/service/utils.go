@@ -220,7 +220,7 @@ func QueryPositionInfoFromRepo(ctx context.Context, positionRepo *data.PositionR
 		posIds = append(posIds, posId)
 	}
 
-	poss, err := positionRepo.GetPositionByIds(ctx, posIds)
+	poss, err := positionRepo.GetPositionsByIds(ctx, posIds)
 	if err != nil {
 		log.Errorf("query positions err: %v", err)
 		return

@@ -6,7 +6,6 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/transport/http"
 
-	"entgo.io/ent/dialect/sql"
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/tx7do/go-utils/trans"
 	pagination "github.com/tx7do/kratos-bootstrap/api/gen/go/pagination/v1"
@@ -50,7 +49,7 @@ func NewApiResourceService(
 
 func (s *ApiResourceService) init() {
 	ctx := context.Background()
-	if count, _ := s.repo.Count(ctx, []func(s *sql.Selector){}); count == 0 {
+	if count, _ := s.repo.Count(ctx); count == 0 {
 		_, _ = s.SyncApiResources(ctx, &emptypb.Empty{})
 	}
 }
@@ -127,6 +126,7 @@ func (s *ApiResourceService) Delete(ctx context.Context, req *adminV1.DeleteApiR
 }
 
 func (s *ApiResourceService) SyncApiResources(ctx context.Context, _ *emptypb.Empty) (*emptypb.Empty, error) {
+	// soft delete
 	_ = s.repo.Truncate(ctx)
 
 	//if err := s.syncWithWalkRoute(ctx); err != nil {
@@ -182,24 +182,28 @@ func (s *ApiResourceService) syncWithOpenAPI(ctx context.Context) error {
 
 			count++
 
-			apiResourceList = append(apiResourceList, &adminV1.ApiResource{
-				Id:                trans.Ptr(count),
-				Path:              trans.Ptr(path),
-				Method:            trans.Ptr(method),
-				Module:            trans.Ptr(module),
-				ModuleDescription: trans.Ptr(moduleDescription),
-				Description:       trans.Ptr(operation.Description),
-				Operation:         trans.Ptr(operation.OperationID),
-			})
+			apiResourceList = append(
+				apiResourceList, &adminV1.ApiResource{
+					Id:                trans.Ptr(count),
+					Path:              trans.Ptr(path),
+					Method:            trans.Ptr(method),
+					Module:            trans.Ptr(module),
+					ModuleDescription: trans.Ptr(moduleDescription),
+					Description:       trans.Ptr(operation.Description),
+					Operation:         trans.Ptr(operation.OperationID),
+				},
+			)
 		}
 	}
 
 	for i, res := range apiResourceList {
 		res.Id = trans.Ptr(uint32(i + 1))
-		_ = s.repo.Update(ctx, &adminV1.UpdateApiResourceRequest{
-			AllowMissing: trans.Ptr(true),
-			Data:         res,
-		})
+		_ = s.repo.Update(
+			ctx, &adminV1.UpdateApiResourceRequest{
+				AllowMissing: trans.Ptr(true),
+				Data:         res,
+			},
+		)
 	}
 
 	return nil
@@ -215,28 +219,34 @@ func (s *ApiResourceService) syncWithWalkRoute(ctx context.Context) error {
 
 	var apiResourceList []*adminV1.ApiResource
 
-	if err := s.RestServer.WalkRoute(func(info http.RouteInfo) error {
-		//log.Infof("Path[%s] Method[%s]", info.Path, info.Method)
-		count++
+	if err := s.RestServer.WalkRoute(
+		func(info http.RouteInfo) error {
+			//log.Infof("Path[%s] Method[%s]", info.Path, info.Method)
+			count++
 
-		apiResourceList = append(apiResourceList, &adminV1.ApiResource{
-			Id:     trans.Ptr(count),
-			Path:   trans.Ptr(info.Path),
-			Method: trans.Ptr(info.Method),
-		})
+			apiResourceList = append(
+				apiResourceList, &adminV1.ApiResource{
+					Id:     trans.Ptr(count),
+					Path:   trans.Ptr(info.Path),
+					Method: trans.Ptr(info.Method),
+				},
+			)
 
-		return nil
-	}); err != nil {
+			return nil
+		},
+	); err != nil {
 		s.log.Errorf("failed to walk route: %v", err)
 		return adminV1.ErrorInternalServerError("failed to walk route")
 	}
 
 	for i, res := range apiResourceList {
 		res.Id = trans.Ptr(uint32(i + 1))
-		_ = s.repo.Update(ctx, &adminV1.UpdateApiResourceRequest{
-			AllowMissing: trans.Ptr(true),
-			Data:         res,
-		})
+		_ = s.repo.Update(
+			ctx, &adminV1.UpdateApiResourceRequest{
+				AllowMissing: trans.Ptr(true),
+				Data:         res,
+			},
+		)
 	}
 
 	return nil
@@ -252,16 +262,20 @@ func (s *ApiResourceService) GetWalkRouteData(_ context.Context, _ *emptypb.Empt
 		Items: []*adminV1.ApiResource{},
 	}
 	var count uint32 = 0
-	if err := s.RestServer.WalkRoute(func(info http.RouteInfo) error {
-		//log.Infof("Path[%s] Method[%s]", info.Path, info.Method)
-		count++
-		resp.Items = append(resp.Items, &adminV1.ApiResource{
-			Id:     trans.Ptr(count),
-			Path:   trans.Ptr(info.Path),
-			Method: trans.Ptr(info.Method),
-		})
-		return nil
-	}); err != nil {
+	if err := s.RestServer.WalkRoute(
+		func(info http.RouteInfo) error {
+			//log.Infof("Path[%s] Method[%s]", info.Path, info.Method)
+			count++
+			resp.Items = append(
+				resp.Items, &adminV1.ApiResource{
+					Id:     trans.Ptr(count),
+					Path:   trans.Ptr(info.Path),
+					Method: trans.Ptr(info.Method),
+				},
+			)
+			return nil
+		},
+	); err != nil {
 		s.log.Errorf("failed to walk route: %v", err)
 		return nil, adminV1.ErrorInternalServerError("failed to walk route")
 	}
