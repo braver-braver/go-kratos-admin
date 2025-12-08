@@ -41,3 +41,8 @@ dist/
 build/
 coverage/
 .env*
+
+.lh
+.codex
+.serena
+.specify
