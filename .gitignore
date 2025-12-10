@@ -32,3 +32,8 @@ bin/
 .vscode/
 .idea/
 *.swp
+
+# Vibe Coding
+.codex/
+.serena/
+.lh/
