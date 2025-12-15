@@ -3,15 +3,15 @@
 
 openapi: 3.0.3
 info:
-    title: Kratos Admin API
-    description: Kratos Admin API
+    title: GoWind Admin API
+    description: GoWind Admin API
     contact:
         name: tx7do
-        url: https://github.com/tx7do/kratos-admin
+        url: https://github.com/tx7do/go-wind-admin
         email: yanglinbo@gmail.com
     license:
         name: MIT License
-        url: https://github.com/tx7do/kratos-admin/blob/master/LICENSE
+        url: https://github.com/tx7do/go-wind-admin/blob/master/LICENSE
     version: "1.0"
 paths:
     /admin/v1/admin_login_logs:

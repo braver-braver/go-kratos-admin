@@ -7,15 +7,15 @@ import (
 	authnEngine "github.com/tx7do/kratos-authn/engine"
 	"github.com/tx7do/kratos-authn/engine/jwt"
 
-	"github.com/tx7do/go-crud/entgo"
+	entCrud "github.com/tx7do/go-crud/entgo"
 	"github.com/tx7do/go-utils/password"
 
 	conf "github.com/tx7do/kratos-bootstrap/api/gen/go/conf/v1"
 	redisClient "github.com/tx7do/kratos-bootstrap/cache/redis"
 
-	"kratos-admin/app/admin/service/internal/data/ent"
+	"go-wind-admin/app/admin/service/internal/data/ent"
 
-	"kratos-admin/pkg/oss"
+	"go-wind-admin/pkg/oss"
 )
 
 // Data .
@@ -23,7 +23,7 @@ type Data struct {
 	log *log.Helper
 
 	rdb *redis.Client
-	db  *entgo.EntClient[*ent.Client]
+	db  *entCrud.EntClient[*ent.Client]
 
 	authenticator authnEngine.Authenticator
 	authorizer    *Authorizer
@@ -32,7 +32,7 @@ type Data struct {
 // NewData .
 func NewData(
 	logger log.Logger,
-	db *entgo.EntClient[*ent.Client],
+	db *entCrud.EntClient[*ent.Client],
 	rdb *redis.Client,
 ) (*Data, func(), error) {
 	l := log.NewHelper(log.With(logger, "module", "data/admin-service"))
